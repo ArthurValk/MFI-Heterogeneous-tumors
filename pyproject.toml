@@ -1,0 +1,23 @@
+[project]
+name = "heterogenous_tumors"
+version = "0.1.0"
+description = "Modelling heterogenous tumors when cell fusion and chemotherapy are present"
+requires-python = ">=3.13"
+dependencies = [
+    "numba>=0.63.1",
+    "numpy>=2.3.5",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0",
+    "ruff==0.12.8",
+    "pytest-cov",
+    "ty>=0.0.16",
+]
+
+[tool.coverage.run]
+source = ["aida_ts"]
+
+[tool.coverage.report]
+show_missing = true
