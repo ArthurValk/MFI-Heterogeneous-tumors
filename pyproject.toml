@@ -2,18 +2,22 @@
 name = "heterogenous_tumors"
 version = "0.1.0"
 description = "Modelling heterogenous tumors when cell fusion and chemotherapy are present"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
+    "matplotlib>=3.10.8",
     "numba>=0.63.1",
     "numpy>=2.3.5",
+    "polars[pyarrow]>=1.38.1",
 ]
 
 [tool.uv]
 dev-dependencies = [
-    "pytest>=7.0",
+    "icecream>=2.1.10",
+    "pytest>=9.0.2",
     "ruff==0.12.8",
     "pytest-cov",
     "ty>=0.0.16",
+    "pytest>=9.0.2",
 ]
 
 [tool.coverage.run]

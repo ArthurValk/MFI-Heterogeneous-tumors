@@ -10,7 +10,23 @@ import sys
 import os
 import csv
 
-from non_spatial_no_chemotherapy.parametrization import ModelParameters, ModelResult
+from non_spatial_no_chemotherapy.parametrization import (
+    ModelParameters,
+    ModelResult,
+    MetricNames,
+)
+
+
+# Field indices for population data tuples (used in _ModelRun with @njit)
+POP_COUNT = 0
+POP_GENOTYPE = 1
+POP_CELLS_TO_MUTATE = 2
+POP_BIRTH_TIME = 3
+POP_ANCESTOR_ID = 4
+POP_FUSION_COUNT = 5
+POP_GENOTYPE_ID = 6
+
+DATA_RESOLUTION = 25
 
 
 # Functions
@@ -32,7 +48,7 @@ def countPopulation(ListePopulation):
     """
     countPop = 0
     for i in range(0, len(ListePopulation)):
-        countPop = countPop + ListePopulation[i]["count"]
+        countPop = countPop + ListePopulation[i][POP_COUNT]
     return countPop
 
 
@@ -53,7 +69,7 @@ def countSpecies(ListePopulation):
     """
     countS = 0
     for i in range(0, len(ListePopulation)):
-        if ListePopulation[i]["count"] > 0:
+        if ListePopulation[i][POP_COUNT] > 0:
             countS = countS + 1
     return countS
 
@@ -99,11 +115,11 @@ def ComputeShanon(ListePopulation):
     res = 0
     Tot = 0
     for i in range(0, len(ListePopulation)):
-        Tot = Tot + ListePopulation[i]["count"]
+        Tot = Tot + ListePopulation[i][POP_COUNT]
 
     for i in range(0, len(ListePopulation)):
-        if ListePopulation[i]["count"] > 0:
-            prop = float(ListePopulation[i]["count"]) / Tot
+        if ListePopulation[i][POP_COUNT] > 0:
+            prop = float(ListePopulation[i][POP_COUNT]) / Tot
             res = res - prop * np.log(prop)
 
     return res
@@ -133,10 +149,10 @@ def ComputeIndex(ListePopulation, q):
     else:
         Tot = 0
         for i in range(0, len(ListePopulation)):
-            Tot = Tot + ListePopulation[i]["count"]
+            Tot = Tot + ListePopulation[i][POP_COUNT]
 
         for i in range(0, len(ListePopulation)):
-            prop = float(ListePopulation[i]["count"]) / Tot
+            prop = float(ListePopulation[i][POP_COUNT]) / Tot
             res = res + prop**q
         res = res ** (float(1) / (1 - q))
 
@@ -223,9 +239,9 @@ def chooseElement(ListePopulation, total_pop):
     count = 0
     found = 0
     while count < len(ListePopulation) and found == 0:
-        if ListePopulation[count]["count"] > 0:
-            countPop2 = countPop2 + ListePopulation[count]["count"]
-        if y <= countPop2 and ListePopulation[count]["count"] > 0:
+        if ListePopulation[count][POP_COUNT] > 0:
+            countPop2 = countPop2 + ListePopulation[count][POP_COUNT]
+        if y <= countPop2 and ListePopulation[count][POP_COUNT] > 0:
             found = 1
             res = count
         count = count + 1
@@ -234,31 +250,33 @@ def chooseElement(ListePopulation, total_pop):
     return res
 
 
+@njit
 def cleanData(ListePopulation):
     """
-    Filter population array to keep only genotypes with living cells.
+    Filter population list to keep only genotypes with living cells.
 
     Parameters
     ----------
-    ListePopulation : np.ndarray
-        Structured array containing population data
+    ListePopulation : list
+        List of population entries (as lists with integer indices)
 
     Returns
     -------
-    np.ndarray
-        Filtered array containing only genotypes with count > 0.
+    list
+        Filtered list containing only genotypes with count > 0.
         The cells_to_mutate and fusion_count fields are reset to 0
         for all remaining entries
     """
-    # Keep only entries where count > 0
-    mask = ListePopulation["count"] > 0
-    filtered = ListePopulation[mask].copy()
+    # Filter and reset
+    result = []
+    for entry in ListePopulation:
+        if entry[POP_COUNT] > 0:
+            new_entry = list(entry)  # Copy the entry
+            new_entry[POP_CELLS_TO_MUTATE] = 0
+            new_entry[POP_FUSION_COUNT] = 0
+            result.append(new_entry)
 
-    # Reset cells_to_mutate and fusion_count for remaining entries
-    filtered["cells_to_mutate"] = 0
-    filtered["fusion_count"] = 0
-
-    return filtered
+    return result
 
 
 @njit
@@ -285,8 +303,8 @@ def fusionVect(G1, G2):
         from G1 while the other gets from G2, representing proper genetic segregation
         during ploidy reduction.
     """
-    hybrid1 = np.zeros(len(G1))
-    hybrid2 = np.zeros(len(G1))
+    hybrid1 = np.zeros(len(G1), dtype=np.bool_)
+    hybrid2 = np.zeros(len(G1), dtype=np.bool_)
 
     for i in range(0, len(G1)):
         # Randomly decide which offspring gets which parent's allele
@@ -303,14 +321,16 @@ def fusionVect(G1, G2):
 
 
 @njit
-def MaxScore(ListePopulation):
+def MaxScore(ListePopulation, all_genotypes):
     """
     Find the maximum number of mutations across all genotypes.
 
     Parameters
     ----------
-    ListePopulation : np.ndarray
-        Structured array containing population data with 'genotype' field
+    ListePopulation : list
+        List of population entries (with genotype indices at POP_GENOTYPE)
+    all_genotypes : list
+        List of all genotype arrays
 
     Returns
     -------
@@ -319,7 +339,8 @@ def MaxScore(ListePopulation):
     """
     res = 0
     for i in range(0, len(ListePopulation)):
-        scorei = np.sum(ListePopulation[i]["genotype"])
+        genotype_idx = ListePopulation[i][POP_GENOTYPE]
+        scorei = np.sum(all_genotypes[genotype_idx])
         res = scorei if res < scorei else res
     return res
 
@@ -366,6 +387,9 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
     -------
     ModelResult
         Object containing paths to the generated CSV files with simulation results:
+        - metrics_path: Path to metrics CSV (time, total_cells, num_genotypes, shannon_index, simpson_index, max_mutations)
+        - lineage_path: Path to lineage CSV (time, cell_count, genotype_id, ancestor_id)
+        - genotype_path: Path to genotypes CSV (genotype_id, locus_0, locus_1, ..., locus_N)
     """
     Ngenes = parameters.number_of_genes
     NgenerationsMax = parameters.number_of_generations
@@ -376,7 +400,7 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
     pf = parameters.fusion_rate
     growthRate = parameters.growth_rate
     deathRate = parameters.death_rate
-    diversity = parameters.diversity
+    diversity = parameters.diversity if parameters.diversity is not None else 0
     # Compute directory path from save_path and parameters
     directory_path = parameters.save_path / f"g{growthRate}" / f"mu{pm}" / f"pf{pf}"
 
@@ -386,7 +410,7 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
     if s:
         np.random.seed(int(s))
 
-    result = _ModelRun(
+    lineage_data, metrics_data, all_genotypes = _ModelRun(
         Ngenes=Ngenes,
         NgenerationsMax=NgenerationsMax,
         DT=DT,
@@ -400,39 +424,37 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
 
     # Write collected data to CSV files
     model_result = ModelResult(
+        metrics_path=directory_path / f"Metrics{str(s)}.csv",
         lineage_path=directory_path / f"Lineage{str(s)}.csv",
-        mutation_number_path=directory_path / f"NumberMut{str(s)}.csv",
-        score_path=directory_path / f"Score{str(s)}.csv",
-        shannon_path=directory_path / f"Shanon{str(s)}.csv",
-        simpson_path=directory_path / f"Simpson{str(s)}.csv",
-        total_data_path=directory_path / f"Total{str(s)}.csv",
+        genotype_path=directory_path / f"Genotypes{str(s)}.csv",
+    )
+    _write_csv_file(
+        model_result.metrics_path,
+        [
+            MetricNames.time,
+            MetricNames.total_cells,
+            MetricNames.num_genotypes,
+            MetricNames.shannon_index,
+            MetricNames.simpson_index,
+            MetricNames.max_mutations,
+        ],
+        metrics_data,
     )
     _write_csv_file(
         model_result.lineage_path,
-        ["Time", "CellCount", "GenotypeId", "AncestorId"],
-        result["lineage"],
+        [
+            MetricNames.time,
+            MetricNames.cell_count,
+            MetricNames.genotype_id,
+            MetricNames.ancestor_id,
+        ],
+        lineage_data,
     )
     _write_csv_file(
-        model_result.total_data_path,
-        ["Time", "TotalCells"],
-        result["total_cells"],
+        model_result.genotype_path,
+        ["GenotypeId"] + [f"Locus{i}" for i in range(Ngenes)],
+        [[idx] + genotype.tolist() for idx, genotype in enumerate(all_genotypes)],
     )
-    _write_csv_file(
-        model_result.mutation_number_path,
-        ["Time", "NumGenotypes"],
-        result["number_mut"],
-    )
-    _write_csv_file(
-        model_result.shannon_path,
-        ["Time", "ShannonIndex"],
-        result["shanon"],
-    )
-    _write_csv_file(
-        model_result.simpson_path,
-        ["Time", "SimpsonIndex"],
-        result["simpson"],
-    )
-    _write_csv_file(model_result.score_path, ["Time", "MaxMutations"], result["score"])
     return model_result
 
 
@@ -463,6 +485,7 @@ def add_population_entry(arr, entry_tuple):
 
 
 # Main Function
+@njit
 def _ModelRun(
     Ngenes: int,
     NgenerationsMax: int,
@@ -472,8 +495,8 @@ def _ModelRun(
     pf: float,
     growthRate: float,
     deathRate: float,
-    diversity: int | None = None,
-) -> dict:
+    diversity: int = 0,
+):
     """
     Core model simulation for heterogeneous tumor growth with cell fusion.
 
@@ -507,14 +530,10 @@ def _ModelRun(
 
     Returns
     -------
-    dict[str, list[str]]
-        Dictionary containing simulation results with keys:
-        - 'lineage': Cell counts, genotypes, times, and ancestor IDs for extinct and living genotypes
-        - 'total_cells': Total population size at each time step
-        - 'number_mut': Number of distinct genotypes at each time step
-        - 'shanon': Shannon diversity index at each time step
-        - 'simpson': Simpson diversity index at each time step
-        - 'score': Maximum number of mutations at each time step
+    tuple[list, list, list]
+        lineage_data: List of lists containing lineage information for each time step
+        metrics_data: List of lists containing population metrics for each time step
+        all_genotypes: List of all unique genotype arrays encountered during the simulation
 
     Notes
     -----
@@ -533,7 +552,7 @@ def _ModelRun(
 
     4. **Data Collection**: Record lineage, population statistics, and diversity indices
     """
-    Genotype = np.zeros(Ngenes, dtype=bool)
+    Genotype = np.zeros(Ngenes, dtype=np.bool_)
 
     Number = np.zeros(NgenerationsMax)  # Number of genotypes per time step
     Shanon = np.zeros(NgenerationsMax)  # Shanon index per time step
@@ -541,49 +560,29 @@ def _ModelRun(
     Score = np.zeros(NgenerationsMax)  # Maximal amount of mutations per time step
     TotalCells = np.zeros(NgenerationsMax)  # Total number of cells per time step
 
-    # Define structured array dtype for population
-    pop_dtype = np.dtype(
-        [
-            ("count", np.int32),
-            ("genotype", np.uint8, (Ngenes,)),
-            ("cells_to_mutate", np.int32),
-            ("birth_time", np.float64),
-            ("ancestor_id", np.int32),
-            ("fusion_count", np.int32),
-            ("genotype_id", np.int32),
-        ]
-    )
-
-    # Initialize population arrays
-    ListePop = np.array([], dtype=pop_dtype)
-    ListeExtincted = np.array([], dtype=pop_dtype)
+    # Initialize population arrays and genotype storage
+    all_genotypes = []  # Store all unique genotype arrays
+    ListePop = []  # Store population entries with genotype indices
+    ListeExtincted = []
     genotypesCounts = 0
 
     # Add initial genotype
-    initial_entry = np.array(
-        [(1, Genotype.copy(), 0, 0, genotypesCounts, 0, genotypesCounts)],
-        dtype=pop_dtype,
-    )
-    ListePop = np.concatenate([ListePop, initial_entry])
+    all_genotypes.append(Genotype.copy())
+    initial_entry = [1, 0, 0, 0, genotypesCounts, 0, genotypesCounts]  # genotype_idx=0
+    ListePop.append(initial_entry)
 
     # Add initial diverse genotypes if specified
-    if diversity and diversity > 1:
+    if diversity > 1:
         for i in range(1, diversity):
             genotypesCounts = genotypesCounts + 1
             mutant_genotype = TargetedMutation(Genotype, (i - 1) % Ngenes)
-            diverse_entry = np.array(
-                [(1, mutant_genotype, 0, 0, 0, 0, genotypesCounts)],
-                dtype=pop_dtype,
-            )
-            ListePop = np.concatenate([ListePop, diverse_entry])
+            all_genotypes.append(mutant_genotype)
+            diverse_entry = [1, len(all_genotypes) - 1, 0, 0, 0, 0, genotypesCounts]
+            ListePop.append(diverse_entry)
 
     # Data collection for output files
     lineage_data = []  # f1 data
-    total_cells_data = []  # f2 data
-    number_mut_data = []  # f3 data
-    shanon_data = []  # f4 data
-    simpson_data = []  # f5 data
-    score_data = []  # f6 data
+    metrics_data = []  # consolidated metrics data
 
     # Time loop
     for l in range(0, NgenerationsMax):
@@ -592,7 +591,7 @@ def _ModelRun(
 
         # Population loop
         for j in range(0, len(ListePop)):
-            nombreRepresentants = ListePop[j]["count"]
+            nombreRepresentants = ListePop[j][POP_COUNT]
             if nombreRepresentants > 0:
                 newCells = np.random.poisson(
                     growthRate * nombreRepresentants * DT
@@ -620,61 +619,63 @@ def _ModelRun(
                         else:
                             newD2 = newD2 + 1
                         countDeads = countDeads + 1
-                    if ListePop[j]["count"] + newCells - newM - newD1 > 0:
-                        ListePop[j]["count"] = (
-                            ListePop[j]["count"] + newCells - newM - newD1
+                    if ListePop[j][POP_COUNT] + newCells - newM - newD1 > 0:
+                        ListePop[j][POP_COUNT] = (
+                            ListePop[j][POP_COUNT] + newCells - newM - newD1
                         )
                     else:
-                        ListePop[j]["count"] = 0
+                        ListePop[j][POP_COUNT] = 0
                     if newM - newD2 > 0:
-                        ListePop[j]["cells_to_mutate"] = newM - newD2
+                        ListePop[j][POP_CELLS_TO_MUTATE] = newM - newD2
                     else:
-                        ListePop[j]["cells_to_mutate"] = 0
+                        ListePop[j][POP_CELLS_TO_MUTATE] = 0
                 else:
-                    ListePop[j]["count"] = 0
-                    ListePop[j]["cells_to_mutate"] = 0
+                    ListePop[j][POP_COUNT] = 0
+                    ListePop[j][POP_CELLS_TO_MUTATE] = 0
 
-                if ListePop[j]["count"] == 0:
-                    NewElement = (
+                if ListePop[j][POP_COUNT] == 0:
+                    extinct_entry = [
                         1,
-                        ListePop[j]["genotype"],
-                        ListePop[j]["cells_to_mutate"],
+                        ListePop[j][POP_GENOTYPE],
+                        ListePop[j][POP_CELLS_TO_MUTATE],
                         l * DT,
-                        ListePop[j]["ancestor_id"],
-                        ListePop[j]["fusion_count"],
-                        ListePop[j]["genotype_id"],
-                    )
-                    ListeExtincted = add_population_entry(ListeExtincted, NewElement)
+                        ListePop[j][POP_ANCESTOR_ID],
+                        ListePop[j][POP_FUSION_COUNT],
+                        ListePop[j][POP_GENOTYPE_ID],
+                    ]
+                    ListeExtincted.append(extinct_entry)
 
         j = 0
         Ncurrent = len(ListePop)
         while j < Ncurrent:
-            for k in range(0, ListePop[j]["cells_to_mutate"]):
-                GenotypeTemporaire = Mutation(ListePop[j]["genotype"])
+            for k in range(0, ListePop[j][POP_CELLS_TO_MUTATE]):
+                parent_genotype = all_genotypes[ListePop[j][POP_GENOTYPE]]
+                GenotypeTemporaire = Mutation(parent_genotype)
                 exist = 0
                 count = 0
                 while count < len(ListePop) and exist == 0:
                     if (
-                        convertBinaire(ListePop[count]["genotype"])
+                        convertBinaire(all_genotypes[ListePop[count][POP_GENOTYPE]])
                         - convertBinaire(GenotypeTemporaire)
                         == 0
                     ):
-                        ListePop[count]["count"] = ListePop[count]["count"] + 1
+                        ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] + 1
                         exist = 1
                     count = count + 1
                 if exist == 0:
                     genotypesCounts = genotypesCounts + 1
-                    NewElement = (
+                    all_genotypes.append(GenotypeTemporaire)
+                    new_genotype_entry = [
                         1,
-                        GenotypeTemporaire,
+                        len(all_genotypes) - 1,  # genotype index
                         0,
                         l * DT,
-                        ListePop[j]["genotype_id"],
+                        ListePop[j][POP_GENOTYPE_ID],
                         0,
                         genotypesCounts,
-                    )
-                    ListePop = add_population_entry(ListePop, NewElement)
-            ListePop[j]["cells_to_mutate"] = 0
+                    ]
+                    ListePop.append(new_genotype_entry)
+            ListePop[j][POP_CELLS_TO_MUTATE] = 0
             j = j + 1
 
         # Hybrids formation
@@ -689,29 +690,27 @@ def _ModelRun(
             found = 0
 
             while count < len(ListePop) and found == 0:
-                if ListePop[count]["count"] > 0:
-                    countPop2 = countPop2 + ListePop[count]["count"]
+                if ListePop[count][POP_COUNT] > 0:
+                    countPop2 = countPop2 + ListePop[count][POP_COUNT]
                     if y <= countPop2:
                         found = 1
-                        ListePop[count]["fusion_count"] = (
-                            ListePop[count]["fusion_count"] + 1
+                        ListePop[count][POP_FUSION_COUNT] = (
+                            ListePop[count][POP_FUSION_COUNT] + 1
                         )
-                        ListePop[count]["count"] = ListePop[count]["count"] - 1
+                        ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] - 1
                         TotalPopulation = TotalPopulation - 1
 
-                    if ListePop[count]["count"] == 0:
-                        NewElement = (
+                    if ListePop[count][POP_COUNT] == 0:
+                        extinct_entry = [
                             1,
-                            ListePop[count]["genotype"],
-                            ListePop[count]["cells_to_mutate"],
+                            ListePop[count][POP_GENOTYPE],
+                            ListePop[count][POP_CELLS_TO_MUTATE],
                             l * DT,
-                            ListePop[count]["ancestor_id"],
-                            ListePop[count]["fusion_count"],
-                            ListePop[count]["genotype_id"],
-                        )
-                        ListeExtincted = add_population_entry(
-                            ListeExtincted, NewElement
-                        )
+                            ListePop[count][POP_ANCESTOR_ID],
+                            ListePop[count][POP_FUSION_COUNT],
+                            ListePop[count][POP_GENOTYPE_ID],
+                        ]
+                        ListeExtincted.append(extinct_entry)
                 count = count + 1
 
         Ncurrent = len(ListePop)
@@ -719,46 +718,42 @@ def _ModelRun(
 
         if TotalPopulation > 0:
             for j in range(0, Ncurrent):
-                for k in range(0, ListePop[j]["fusion_count"]):
-                    Genotype1 = ListePop[j]["genotype"]
+                for k in range(0, ListePop[j][POP_FUSION_COUNT]):
+                    Genotype1 = all_genotypes[ListePop[j][POP_GENOTYPE]]
 
                     neighbor = chooseElement(ListePop, TotalPopulation)
 
                     # Decrement both initiator and neighbor (both consumed in fusion)
-                    ListePop[j]["count"] = ListePop[j]["count"] - 1
-                    ListePop[neighbor]["count"] = ListePop[neighbor]["count"] - 1
+                    ListePop[j][POP_COUNT] = ListePop[j][POP_COUNT] - 1
+                    ListePop[neighbor][POP_COUNT] = ListePop[neighbor][POP_COUNT] - 1
                     TotalPopulation = TotalPopulation - 2
 
                     # Track extinction of initiator if count reaches zero
-                    if ListePop[j]["count"] == 0:
-                        NewElement = (
+                    if ListePop[j][POP_COUNT] == 0:
+                        extinct_entry = [
                             1,
-                            ListePop[j]["genotype"],
-                            ListePop[j]["cells_to_mutate"],
+                            ListePop[j][POP_GENOTYPE],
+                            ListePop[j][POP_CELLS_TO_MUTATE],
                             l * DT,
-                            ListePop[j]["ancestor_id"],
-                            ListePop[j]["fusion_count"],
-                            ListePop[j]["genotype_id"],
-                        )
-                        ListeExtincted = add_population_entry(
-                            ListeExtincted, NewElement
-                        )
+                            ListePop[j][POP_ANCESTOR_ID],
+                            ListePop[j][POP_FUSION_COUNT],
+                            ListePop[j][POP_GENOTYPE_ID],
+                        ]
+                        ListeExtincted.append(extinct_entry)
 
-                    if ListePop[neighbor]["count"] == 0:
-                        NewElement = (
+                    if ListePop[neighbor][POP_COUNT] == 0:
+                        extinct_entry = [
                             1,
-                            ListePop[neighbor]["genotype"],
-                            ListePop[neighbor]["cells_to_mutate"],
+                            ListePop[neighbor][POP_GENOTYPE],
+                            ListePop[neighbor][POP_CELLS_TO_MUTATE],
                             l * DT,
-                            ListePop[neighbor]["ancestor_id"],
-                            ListePop[neighbor]["fusion_count"],
-                            ListePop[neighbor]["genotype_id"],
-                        )
-                        ListeExtincted = add_population_entry(
-                            ListeExtincted, NewElement
-                        )
+                            ListePop[neighbor][POP_ANCESTOR_ID],
+                            ListePop[neighbor][POP_FUSION_COUNT],
+                            ListePop[neighbor][POP_GENOTYPE_ID],
+                        ]
+                        ListeExtincted.append(extinct_entry)
 
-                    Genotype2 = ListePop[neighbor]["genotype"]
+                    Genotype2 = all_genotypes[ListePop[neighbor][POP_GENOTYPE]]
 
                     # Two offspring from fusion with recombination (parasexual cycle)
                     hybrid1, hybrid2 = fusionVect(Genotype1, Genotype2)
@@ -768,80 +763,79 @@ def _ModelRun(
                     count = 0
                     while count < len(ListePop) and exist == 0:
                         if (
-                            convertBinaire(ListePop[count]["genotype"])
+                            convertBinaire(all_genotypes[ListePop[count][POP_GENOTYPE]])
                             - convertBinaire(hybrid1)
                             == 0
                         ):
-                            ListePop[count]["count"] = ListePop[count]["count"] + 1
+                            ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] + 1
                             exist = 1
                         count = count + 1
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
-
-                        NewElement = (
+                        all_genotypes.append(hybrid1)
+                        hybrid_entry = [
                             1,
-                            hybrid1,
+                            len(all_genotypes) - 1,  # genotype index
                             0,
                             l * DT,
-                            ListePop[j]["genotype_id"],
+                            ListePop[j][POP_GENOTYPE_ID],
                             0,
                             genotypesCounts,
-                        )  # New hybrid genotype!
-                        ListePop = add_population_entry(ListePop, NewElement)
+                        ]  # New hybrid genotype!
+                        ListePop.append(hybrid_entry)
 
                     # Add second hybrid
                     exist = 0
                     count = 0
                     while count < len(ListePop) and exist == 0:
                         if (
-                            convertBinaire(ListePop[count]["genotype"])
+                            convertBinaire(all_genotypes[ListePop[count][POP_GENOTYPE]])
                             - convertBinaire(hybrid2)
                             == 0
                         ):
-                            ListePop[count]["count"] = ListePop[count]["count"] + 1
+                            ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] + 1
                             exist = 1
                         count = count + 1
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
-
-                        NewElement = (
+                        all_genotypes.append(hybrid2)
+                        hybrid_entry = [
                             1,
-                            hybrid2,
+                            len(all_genotypes) - 1,  # genotype index
                             0,
                             l * DT,
-                            ListePop[j]["genotype_id"],
+                            ListePop[j][POP_GENOTYPE_ID],
                             0,
                             genotypesCounts,
-                        )  # New hybrid genotype!
-                        ListePop = add_population_entry(ListePop, NewElement)
+                        ]  # New hybrid genotype!
+                        ListePop.append(hybrid_entry)
 
                     # Net population change: -2 (both parents) +2 (two hybrids) = 0 per fusion
                     TotalPopulation = TotalPopulation + 2
 
-                ListePop[j]["fusion_count"] = 0
+                ListePop[j][POP_FUSION_COUNT] = 0
 
         else:
             for j in range(0, Ncurrent):
-                for k in range(0, ListePop[j]["fusion_count"]):
-                    ListePop[j]["count"] = ListePop[j]["count"] + 1
+                for k in range(0, ListePop[j][POP_FUSION_COUNT]):
+                    ListePop[j][POP_COUNT] = ListePop[j][POP_COUNT] + 1
 
         ListePop = cleanData(ListePop)
 
-        Number[l] = countSpecies(ListePop)
-        TotalCells[l] = countPopulation(ListePop)
-        Shanon[l] = ComputeShanon(ListePop)
-        Simpson[l] = ComputeIndex(ListePop, 2)
-        Score[l] = MaxScore(ListePop)
-
         # Collecting results for output files
-        if l % 50 == 0 or l == NgenerationsMax - 1:
+        if l % DATA_RESOLUTION == 0 or l == NgenerationsMax - 1:
+            Number[l] = countSpecies(ListePop)
+            TotalCells[l] = countPopulation(ListePop)
+            Shanon[l] = ComputeShanon(ListePop)
+            Simpson[l] = ComputeIndex(ListePop, 2)
+            Score[l] = MaxScore(ListePop, all_genotypes)
             for i in range(0, len(ListeExtincted)):
                 lineage_data.append(
                     [
                         l * DT,
                         1,
-                        ListeExtincted[i]["genotype_id"],
-                        ListeExtincted[i]["ancestor_id"],
+                        ListeExtincted[i][POP_GENOTYPE_ID],
+                        ListeExtincted[i][POP_ANCESTOR_ID],
                     ]
                 )
 
@@ -849,29 +843,20 @@ def _ModelRun(
                 lineage_data.append(
                     [
                         l * DT,
-                        ListePop[i]["count"],
-                        ListePop[i]["genotype_id"],
-                        ListePop[i]["ancestor_id"],
+                        ListePop[i][POP_COUNT],
+                        ListePop[i][POP_GENOTYPE_ID],
+                        ListePop[i][POP_ANCESTOR_ID],
                     ]
                 )
 
-            total_cells_data.append([l * DT, TotalCells[l]])
-            number_mut_data.append([l * DT, Number[l]])
-            shanon_data.append([l * DT, Shanon[l]])
-            simpson_data.append([l * DT, Simpson[l]])
-            score_data.append([l * DT, Score[l]])
+            metrics_data.append(
+                [l * DT, TotalCells[l], Number[l], Shanon[l], Simpson[l], Score[l]]
+            )
 
-            ListeExtincted = np.array([], dtype=ListeExtincted.dtype)
+            ListeExtincted = ListeExtincted[:0]  # Clear while preserving type
 
-    # Return all collected data for file writing
-    return {
-        "lineage": lineage_data,
-        "total_cells": total_cells_data,
-        "number_mut": number_mut_data,
-        "shanon": shanon_data,
-        "simpson": simpson_data,
-        "score": score_data,
-    }
+    # Return all collected data for file writing (as tuple for Numba compatibility)
+    return lineage_data, metrics_data, all_genotypes
 
 
 if __name__ == "main":

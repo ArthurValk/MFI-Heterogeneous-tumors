@@ -31,23 +31,32 @@ class ModelResult:
 
     Attributes
     ----------
+    metrics_path: Path
+        Path to the .csv file containing all metrics
+        (Time, TotalCells, NumGenotypes, ShannonIndex, SimpsonIndex, MaxMutations)
     lineage_path: Path
         Path to the .csv file containing the lineage data
-    mutation_number_path: Path
-        Path to the .csv file containing the mutation number data
-    score_path: Path
-        Path to the .csv file containing the score data
-    shannon_path: Path
-        Path to the .csv file containing the shannon index data
-    simpson_path: Path
-        Path to the .csv file containing the simpson index data
-    total_data_path: Path
-        Path to the .csv file containing the total data
+    genotype_path: Path
+        Path to the .csv file containing the genotype data
     """
 
+    metrics_path: Path
     lineage_path: Path
-    mutation_number_path: Path
-    score_path: Path
-    shannon_path: Path
-    simpson_path: Path
-    total_data_path: Path
+    genotype_path: Path
+
+
+class MetricNames:
+    """Names of the metrics"""
+
+    # metrics
+    time = "Time"
+    total_cells = "TotalCells"
+    num_genotypes = "NumGenotypes"
+    shannon_index = "ShannonIndex"
+    simpson_index = "SimpsonIndex"
+    max_mutations = "MaxMutations"
+
+    # lineage
+    cell_count = "TotalCells"
+    genotype_id = "GenotypeId"
+    ancestor_id = "AncestorId"
