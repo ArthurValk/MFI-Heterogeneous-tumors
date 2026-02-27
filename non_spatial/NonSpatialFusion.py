@@ -75,28 +75,6 @@ def countSpecies(ListePopulation):
 
 
 @njit
-def convertBinaire(x):
-    """
-    Convert a binary array to an integer representation.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Binary array (values 0 or 1), where index i corresponds to 2^i
-
-    Returns
-    -------
-    int
-        Integer representation of the binary array
-    """
-    n = len(x)
-    res = 0
-    for i in range(0, n):
-        res = res + x[i] * (2**i)
-    return res
-
-
-@njit
 def ComputeShanon(ListePopulation):
     """
     Compute the Shannon diversity index for the population.
@@ -456,6 +434,7 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
     treatment_duration = parameters.treatment_duration
     treatment_base_extra = parameters.treatment_base_extra_death
     treatment_selection = parameters.treatment_selection
+    treatment_cell_density_dependence = parameters.treatment_cell_density_dependence
 
     # Compute directory path from save_path and parameters
     directory_path = parameters.save_path / f"g{growthRate}" / f"mu{pm}" / f"pf{pf}"
@@ -480,6 +459,7 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
         treatment_duration=treatment_duration,
         treatment_base_extra=treatment_base_extra,
         treatment_selection=treatment_selection,
+        treatment_cell_density_dependence=treatment_cell_density_dependence,
     )
 
     # ---- STEP 7: Convert Numba typed outputs to plain Python types ----
@@ -593,6 +573,7 @@ def _ModelRun(
     treatment_duration: int = 0,
     treatment_base_extra: float = 0.3,
     treatment_selection: float = 0.1,
+    treatment_cell_density_dependence: float = 0.0,
 ):
     """
     Core model simulation for heterogeneous tumor growth with cell fusion.
@@ -624,6 +605,20 @@ def _ModelRun(
         Number of initial genotypes to seed (default: None, only wildtype)
         If diversity > 1, starts with wildtype + (diversity-1) genotypes with single mutations
         at different loci (0, 1, 2, ..., diversity-2)
+    treatment_every : int, optional
+        Treatment cycle off-duration (days between treatment pulses). If < 0, no treatment applied.
+        Treatment is active from day treatment_every to treatment_every + treatment_duration
+    treatment_duration : int, optional
+        Duration of each treatment pulse (days)
+    treatment_base_extra_death : float, optional
+        Base extra death rate during treatment before density scaling (default: 0.3)
+    treatment_selection : float, optional
+        Fraction of genes that confer resistance (0-1). These genes reduce treatment death
+        when present in the genotype (default: 0.1 for 10%)
+    treatment_cell_density_dependence : float, optional
+        Scaling factor for cell density effects on treatment efficacy (default: 0.0).
+        Higher cell density reduces treatment efficacy as: treat_death = base / (1 + factor * density)
+        Value 0.0 means density-independent treatment; higher values increase density dependence
 
     Returns
     -------
@@ -639,7 +634,10 @@ def _ModelRun(
     1. **Births and Deaths**: For each genotype:
        - Generate new cells via Poisson process: births ~ Poisson(growthRate * count * DT)
        - Generate mutants from births via binomial: mutants ~ Binomial(births, Ngenes * pm)
-       - Generate deaths via Poisson: deaths ~ Poisson(deathRate * count * totalPop * DT / KC)
+       - Generate deaths via Poisson: deaths ~ Poisson((base_competition + treatment) * count * DT)
+       - Base competition death: deathRate * (totalPop / KC)
+       - Treatment death (if active): base_extra_death / (1 + cell_density_dependence * totalPop / KC)
+       - Treatment resistance reduces extra death based on genotype mutations at selected loci
 
     2. **Mutation Processing**: Process mutant cells, creating new genotypes
 
@@ -750,12 +748,15 @@ def _ModelRun(
                 # --- competition death (density-dependent) ---
                 base_term = deathRate * (TotalPopulation / KC)
 
-                # --- treatment death (density-independent) ---
+                # --- treatment death (with cell density dependence) ---
                 treat_term = 0.0
                 if treat_on:
-                    treat_term = extra_death_by_genotype[
-                        genotype_idx
-                    ]  # already >= 0 in your construction
+                    base_treat = extra_death_by_genotype[genotype_idx]
+                    # Scale with cell density: treat_death = base / (1 + scaling * density)
+                    # Higher density reduces treatment efficacy
+                    treat_term = base_treat / (
+                        1.0 + treatment_cell_density_dependence * (TotalPopulation / KC)
+                    )
 
                 # total per-cell death hazard this step
                 hazard = (base_term + treat_term) * DT

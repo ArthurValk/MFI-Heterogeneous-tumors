@@ -3,8 +3,8 @@
 import pytest
 import polars as pl
 
-from non_spatial_no_chemotherapy.parametrization import MetricNames
-from non_spatial_no_chemotherapy.plot_results import (
+from non_spatial.parametrization import MetricNames
+from non_spatial.plot_results import (
     plot_metric,
     plot_lineage_stack,
     plot_genotype_heatmap,

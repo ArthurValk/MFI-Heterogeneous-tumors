@@ -33,6 +33,9 @@ class ModelParameters:
 
     treatment_base_extra_death: float = 0.3  # flat extra death during treatment
     treatment_selection: float = 0.1  # fraction of genes that confer resistance (10%)
+    treatment_cell_density_dependence: float = (
+        0.0  # scaling factor for cell density effects on treatment efficacy
+    )
 
 
 @dataclass(frozen=True)
