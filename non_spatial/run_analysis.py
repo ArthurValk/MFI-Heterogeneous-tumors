@@ -1,4 +1,4 @@
-"""analysis notebook. To run, run `marimo edit non+spatial_no_chemotherapy/run_analysis.py` from project root."""
+"""analysis notebook. To run, run `marimo edit non_spatial_no_chemotherapy/run_analysis.py` from project root."""
 
 import marimo
 
