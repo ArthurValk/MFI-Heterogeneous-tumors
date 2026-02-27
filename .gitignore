@@ -86,3 +86,4 @@ tests/test_output/
 uv.lock
 
 out/
+__marimo__
