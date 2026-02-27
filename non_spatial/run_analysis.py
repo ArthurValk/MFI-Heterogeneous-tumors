@@ -20,7 +20,6 @@ def _():
     from parametrization import ModelParameters, MetricNames
     from output import OUTPUT_PATH
 
-
     return MetricNames, ModelParameters, ModelRun, OUTPUT_PATH, pl
 
 

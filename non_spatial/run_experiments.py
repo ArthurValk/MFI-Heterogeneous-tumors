@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from non_spatial_no_chemotherapy.NonSpatialFusion import ModelRun
-from non_spatial_no_chemotherapy.parametrization import ModelParameters
+from non_spatial.NonSpatialFusion import ModelRun
+from non_spatial.parametrization import ModelParameters
 from output import OUTPUT_PATH
 
 baseline_params = ModelParameters(
