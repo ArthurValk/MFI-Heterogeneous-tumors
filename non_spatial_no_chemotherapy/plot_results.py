@@ -2,14 +2,14 @@
 
 from pathlib import Path
 from typing import Literal
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 from matplotlib import use
 
-from non_spatial_no_chemotherapy.parametrization import MetricNames
+from parametrization import MetricNames
 
-use("Agg")  # Use non-interactive backend for plotting in tests
+# use("Agg")  # Use non-interactive backend for plotting in tests
 
 
 def plot_metric(
@@ -73,7 +73,7 @@ def plot_lineage_stack(
     data: pl.DataFrame,
     save_path: Path,
     extension: Literal["png", "pdf"] = "png",
-    top_n: int = 20,
+    top_n: int | None = None,
 ) -> None:
     """Plotting lineage data as a stacked area plot.
 
@@ -97,18 +97,17 @@ def plot_lineage_stack(
         .sort([MetricNames.time, MetricNames.genotype_id])
     )
 
-    # Filter to top N genotypes at each time point
-    # This captures dynamic diversity without missing important genotypes at specific times
-    grouped = (
-        grouped.with_columns(
-            pl.col(MetricNames.cell_count)
-            .rank(descending=True)
-            .over(MetricNames.time)
-            .alias("rank_at_time")
+    if top_n is not None:
+        grouped = (
+            grouped.with_columns(
+                pl.col(MetricNames.cell_count)
+                .rank(descending=True)
+                .over(MetricNames.time)
+                .alias("rank_at_time")
+            )
+            .filter(pl.col("rank_at_time") <= top_n)
+            .drop("rank_at_time")
         )
-        .filter(pl.col("rank_at_time") <= top_n)
-        .drop("rank_at_time")
-    )
 
     # Convert grouped data to dict for fast lookup
     grouped_dict = grouped.to_dict(as_series=False)

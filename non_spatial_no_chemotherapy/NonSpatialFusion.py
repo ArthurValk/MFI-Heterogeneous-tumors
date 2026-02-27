@@ -3,14 +3,14 @@
 from pathlib import Path
 
 import numpy as np
-
+from numba.typed import List
 from numba import njit
 import time
 import sys
 import os
 import csv
 
-from non_spatial_no_chemotherapy.parametrization import (
+from parametrization import (
     ModelParameters,
     ModelResult,
     MetricNames,
@@ -162,30 +162,14 @@ def ComputeIndex(ListePopulation, q):
 @njit
 def Mutation(x):
     """
-    Generate a mutated genotype by flipping one zero to one.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Binary genotype array where 1 indicates a mutation, 0 indicates wild-type
-
-    Returns
-    -------
-    np.ndarray
-        Mutated genotype with a locus set to 1. If available unmutated loci exist,
-        one is randomly selected. If all loci are mutated, randomly picks any locus
-        and sets it to 1 (trivial)
+    Attempt a mutation at one random locus.
+    If locus is 0/False -> set to 1/True.
+    If locus is already 1/True -> do nothing.
     """
     res = x.copy()
-
-    # Get all loci indices and filter to available (unmutated) loci
-    all_loci = np.arange(len(x))
-    available_loci = all_loci[res == 0] if np.any(res == 0) else all_loci
-
-    # Randomly mutate one available locus (harmless if setting 1 to 1)
-    locus = available_loci[np.random.randint(0, len(available_loci))]
-    res[locus] = 1
-
+    locus = np.random.randint(0, len(res))
+    if not res[locus]:
+        res[locus] = True
     return res
 
 
@@ -210,6 +194,66 @@ def TargetedMutation(x, j):
     if j < len(res):
         res[j] = 1
     return res
+
+
+@njit
+def make_resistivity(Ngenes: int, selection: float, base_extra: float):
+    """
+    Returns resistivity array of length Ngenes.
+    Exactly k genes (k = round(selection*Ngenes), at least 1 if selection>0)
+    get positive weights that sum to base_extra. Others are 0.
+    """
+    resist = np.zeros(Ngenes, dtype=np.float64)
+
+    if selection <= 0.0 or base_extra <= 0.0:
+        return resist
+
+    k = int(selection * Ngenes + 0.5)  # round
+    if k < 1:
+        k = 1
+    if k > Ngenes:
+        k = Ngenes
+
+    idx = np.arange(Ngenes)
+    np.random.shuffle(idx)
+    chosen = idx[:k]
+
+    w = np.random.random(k)  # U(0,1)
+
+    # find max
+    wmax = 0.0
+    for i in range(k):
+        if w[i] > wmax:
+            wmax = w[i]
+
+    if wmax <= 0.0:
+        # fallback (extremely unlikely)
+        per = base_extra
+        for i in range(k):
+            resist[chosen[i]] = per
+        return resist
+
+    # scale so that max == base_extra
+    scale = base_extra / wmax
+    for i in range(k):
+        resist[chosen[i]] = w[i] * scale
+
+    return resist
+
+
+@njit
+def genotype_extra_death(genotype, resistivity, base_extra: float) -> float:
+    """
+    extra = max(0, base_extra - sum(resistivity[i] for i where genotype[i] is True))
+    """
+    s = 0.0
+    for i in range(len(genotype)):
+        if genotype[i]:
+            s += resistivity[i]
+    extra = base_extra - s
+    if extra < 0.0:
+        extra = 0.0
+    return extra
 
 
 @njit
@@ -268,10 +312,17 @@ def cleanData(ListePopulation):
         for all remaining entries
     """
     # Filter and reset
-    result = []
-    for entry in ListePopulation:
+    result = List()
+
+    # Seed element type: int64 array len 7
+    seed = np.zeros(7, dtype=np.int64)
+    result.append(seed)
+    result.pop()
+
+    for i in range(len(ListePopulation)):
+        entry = ListePopulation[i]
         if entry[POP_COUNT] > 0:
-            new_entry = list(entry)  # Copy the entry
+            new_entry = entry.copy()
             new_entry[POP_CELLS_TO_MUTATE] = 0
             new_entry[POP_FUSION_COUNT] = 0
             result.append(new_entry)
@@ -401,6 +452,11 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
     growthRate = parameters.growth_rate
     deathRate = parameters.death_rate
     diversity = parameters.diversity if parameters.diversity is not None else 0
+    treatment_every = parameters.treatment_every
+    treatment_duration = parameters.treatment_duration
+    treatment_base_extra = parameters.treatment_base_extra_death
+    treatment_selection = parameters.treatment_selection
+
     # Compute directory path from save_path and parameters
     directory_path = parameters.save_path / f"g{growthRate}" / f"mu{pm}" / f"pf{pf}"
 
@@ -420,7 +476,23 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
         growthRate=growthRate,
         deathRate=deathRate,
         diversity=diversity,
+        treatment_every=treatment_every if treatment_every is not None else -1,
+        treatment_duration=treatment_duration,
+        treatment_base_extra=treatment_base_extra,
+        treatment_selection=treatment_selection,
     )
+
+    # ---- STEP 7: Convert Numba typed outputs to plain Python types ----
+    # lineage_data: List[np.ndarray(int64, (4,))] -> list[list[int]]
+    lineage_data_py = [row.tolist() for row in lineage_data]
+
+    # metrics_data: List[np.ndarray(float64, (6,))] -> list[list[float]]
+    metrics_data_py = [row.tolist() for row in metrics_data]
+
+    # all_genotypes: List[np.ndarray(bool, (Ngenes,))] -> list[np.ndarray]
+    # (keep as numpy arrays so genotype.tolist() works below)
+    all_genotypes_py = [g.copy() for g in all_genotypes]
+    # ---------------------------------------------------------------
 
     # Write collected data to CSV files
     model_result = ModelResult(
@@ -428,6 +500,7 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
         lineage_path=directory_path / f"Lineage{str(s)}.csv",
         genotype_path=directory_path / f"Genotypes{str(s)}.csv",
     )
+
     _write_csv_file(
         model_result.metrics_path,
         [
@@ -438,8 +511,9 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
             MetricNames.simpson_index,
             MetricNames.max_mutations,
         ],
-        metrics_data,
+        metrics_data_py,
     )
+
     _write_csv_file(
         model_result.lineage_path,
         [
@@ -448,13 +522,15 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
             MetricNames.genotype_id,
             MetricNames.ancestor_id,
         ],
-        lineage_data,
+        lineage_data_py,
     )
+
     _write_csv_file(
         model_result.genotype_path,
         ["GenotypeId"] + [f"Locus{i}" for i in range(Ngenes)],
-        [[idx] + genotype.tolist() for idx, genotype in enumerate(all_genotypes)],
+        [[idx] + genotype.tolist() for idx, genotype in enumerate(all_genotypes_py)],
     )
+
     return model_result
 
 
@@ -484,6 +560,23 @@ def add_population_entry(arr, entry_tuple):
     return np.concatenate([arr, new_entry])
 
 
+@njit
+def is_treatment_time(l: int, every: int, duration: int) -> bool:
+    if every < 0 or duration <= 0:
+        return False
+    cycle = every + duration
+    phase = l % cycle
+    return phase >= every
+
+
+@njit
+def same_genotype(a, b):
+    for i in range(len(a)):
+        if a[i] != b[i]:
+            return False
+    return True
+
+
 # Main Function
 @njit
 def _ModelRun(
@@ -496,6 +589,10 @@ def _ModelRun(
     growthRate: float,
     deathRate: float,
     diversity: int = 0,
+    treatment_every: int = -1,
+    treatment_duration: int = 0,
+    treatment_base_extra: float = 0.3,
+    treatment_selection: float = 0.1,
 ):
     """
     Core model simulation for heterogeneous tumor growth with cell fusion.
@@ -552,6 +649,7 @@ def _ModelRun(
 
     4. **Data Collection**: Record lineage, population statistics, and diversity indices
     """
+
     Genotype = np.zeros(Ngenes, dtype=np.bool_)
 
     Number = np.zeros(NgenerationsMax)  # Number of genotypes per time step
@@ -561,33 +659,79 @@ def _ModelRun(
     TotalCells = np.zeros(NgenerationsMax)  # Total number of cells per time step
 
     # Initialize population arrays and genotype storage
-    all_genotypes = []  # Store all unique genotype arrays
-    ListePop = []  # Store population entries with genotype indices
-    ListeExtincted = []
+    all_genotypes = List()  # list of bool arrays (genotypes)
+    extra_death_by_genotype = List()  # list of float64
+    ListePop = List()  # list of int64 arrays (len=7)
+    ListeExtincted = List()  # list of int64 arrays (len=7)
+
+    lineage_data = List()  # list of int64 arrays (len=4)
+    metrics_data = List()  # list of float64 arrays (len=6)
     genotypesCounts = 0
 
-    # Add initial genotype
+    # --- Seed element types for Numba ---
+    seed_pop = np.zeros(7, dtype=np.int64)
+    ListePop.append(seed_pop)
+    ListePop.pop()
+
+    seed_ext = np.zeros(7, dtype=np.int64)
+    ListeExtincted.append(seed_ext)
+    ListeExtincted.pop()
+
+    seed_line = np.zeros(4, dtype=np.int64)
+    lineage_data.append(seed_line)
+    lineage_data.pop()
+
+    seed_met = np.zeros(6, dtype=np.float64)
+    metrics_data.append(seed_met)
+    metrics_data.pop()
+
+    seed_gen = np.zeros(Ngenes, dtype=np.bool_)
+    all_genotypes.append(seed_gen)
+    all_genotypes.pop()
+
+    extra_death_by_genotype.append(0.0)
+    extra_death_by_genotype.pop()
+    # --- end seeding ---
+
+    # Build treatment resistivity map first (Numba needs this defined before use)
+    resistivity = make_resistivity(Ngenes, treatment_selection, treatment_base_extra)
+
+    # Add initial genotype (wildtype: no mutations -> maximal treatment sensitivity)
     all_genotypes.append(Genotype.copy())
-    initial_entry = [1, 0, 0, 0, genotypesCounts, 0, genotypesCounts]  # genotype_idx=0
+    extra_death_by_genotype.append(
+        genotype_extra_death(Genotype, resistivity, treatment_base_extra)
+    )
+
+    initial_entry = np.array(
+        [1, 0, 0, 0, genotypesCounts, 0, genotypesCounts], dtype=np.int64
+    )
     ListePop.append(initial_entry)
 
     # Add initial diverse genotypes if specified
     if diversity > 1:
         for i in range(1, diversity):
-            genotypesCounts = genotypesCounts + 1
+            genotypesCounts += 1
             mutant_genotype = TargetedMutation(Genotype, (i - 1) % Ngenes)
             all_genotypes.append(mutant_genotype)
-            diverse_entry = [1, len(all_genotypes) - 1, 0, 0, 0, 0, genotypesCounts]
+            extra_death_by_genotype.append(
+                genotype_extra_death(mutant_genotype, resistivity, treatment_base_extra)
+            )
+            diverse_entry = np.array(
+                [1, len(all_genotypes) - 1, 0, 0, 0, 0, genotypesCounts], dtype=np.int64
+            )
             ListePop.append(diverse_entry)
-
-    # Data collection for output files
-    lineage_data = []  # f1 data
-    metrics_data = []  # consolidated metrics data
 
     # Time loop
     for l in range(0, NgenerationsMax):
         print("Generation=", l)
         TotalPopulation = countPopulation(ListePop)
+
+        treat_on = is_treatment_time(l, treatment_every, treatment_duration)
+
+        if l % 50 == 0:
+            print(
+                "t =", l, "treat_on =", treat_on, "TotalPopulation =", TotalPopulation
+            )
 
         # Population loop
         for j in range(0, len(ListePop)):
@@ -600,9 +744,25 @@ def _ModelRun(
                 if newM > newCells:
                     newM = newCells
 
-                newD = np.random.poisson(
-                    deathRate * nombreRepresentants * TotalPopulation * DT / KC
-                )  # New dead cells
+                # For each genotype j:
+                genotype_idx = ListePop[j][POP_GENOTYPE]
+
+                # --- competition death (density-dependent) ---
+                base_term = deathRate * (TotalPopulation / KC)
+
+                # --- treatment death (density-independent) ---
+                treat_term = 0.0
+                if treat_on:
+                    treat_term = extra_death_by_genotype[
+                        genotype_idx
+                    ]  # already >= 0 in your construction
+
+                # total per-cell death hazard this step
+                hazard = (base_term + treat_term) * DT
+                if hazard < 0.0:
+                    hazard = 0.0  # just in case
+
+                newD = np.random.poisson(hazard * nombreRepresentants)
 
                 countDeads = 0
                 newD1 = 0
@@ -634,15 +794,18 @@ def _ModelRun(
                     ListePop[j][POP_CELLS_TO_MUTATE] = 0
 
                 if ListePop[j][POP_COUNT] == 0:
-                    extinct_entry = [
-                        1,
-                        ListePop[j][POP_GENOTYPE],
-                        ListePop[j][POP_CELLS_TO_MUTATE],
-                        l * DT,
-                        ListePop[j][POP_ANCESTOR_ID],
-                        ListePop[j][POP_FUSION_COUNT],
-                        ListePop[j][POP_GENOTYPE_ID],
-                    ]
+                    extinct_entry = np.array(
+                        [
+                            1,
+                            ListePop[j][POP_GENOTYPE],
+                            ListePop[j][POP_CELLS_TO_MUTATE],
+                            l * DT,
+                            ListePop[j][POP_ANCESTOR_ID],
+                            ListePop[j][POP_FUSION_COUNT],
+                            ListePop[j][POP_GENOTYPE_ID],
+                        ],
+                        dtype=np.int64,
+                    )
                     ListeExtincted.append(extinct_entry)
 
         j = 0
@@ -654,10 +817,8 @@ def _ModelRun(
                 exist = 0
                 count = 0
                 while count < len(ListePop) and exist == 0:
-                    if (
-                        convertBinaire(all_genotypes[ListePop[count][POP_GENOTYPE]])
-                        - convertBinaire(GenotypeTemporaire)
-                        == 0
+                    if same_genotype(
+                        all_genotypes[ListePop[count][POP_GENOTYPE]], GenotypeTemporaire
                     ):
                         ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] + 1
                         exist = 1
@@ -665,15 +826,23 @@ def _ModelRun(
                 if exist == 0:
                     genotypesCounts = genotypesCounts + 1
                     all_genotypes.append(GenotypeTemporaire)
-                    new_genotype_entry = [
-                        1,
-                        len(all_genotypes) - 1,  # genotype index
-                        0,
-                        l * DT,
-                        ListePop[j][POP_GENOTYPE_ID],
-                        0,
-                        genotypesCounts,
-                    ]
+                    extra_death_by_genotype.append(
+                        genotype_extra_death(
+                            GenotypeTemporaire, resistivity, treatment_base_extra
+                        )
+                    )
+                    new_genotype_entry = np.array(
+                        [
+                            1,
+                            len(all_genotypes) - 1,
+                            0,
+                            l * DT,
+                            ListePop[j][POP_GENOTYPE_ID],
+                            0,
+                            genotypesCounts,
+                        ],
+                        dtype=np.int64,
+                    )
                     ListePop.append(new_genotype_entry)
             ListePop[j][POP_CELLS_TO_MUTATE] = 0
             j = j + 1
@@ -701,15 +870,18 @@ def _ModelRun(
                         TotalPopulation = TotalPopulation - 1
 
                     if ListePop[count][POP_COUNT] == 0:
-                        extinct_entry = [
-                            1,
-                            ListePop[count][POP_GENOTYPE],
-                            ListePop[count][POP_CELLS_TO_MUTATE],
-                            l * DT,
-                            ListePop[count][POP_ANCESTOR_ID],
-                            ListePop[count][POP_FUSION_COUNT],
-                            ListePop[count][POP_GENOTYPE_ID],
-                        ]
+                        extinct_entry = np.array(
+                            [
+                                1,
+                                ListePop[count][POP_GENOTYPE],
+                                ListePop[count][POP_CELLS_TO_MUTATE],
+                                l * DT,
+                                ListePop[count][POP_ANCESTOR_ID],
+                                ListePop[count][POP_FUSION_COUNT],
+                                ListePop[count][POP_GENOTYPE_ID],
+                            ],
+                            dtype=np.int64,
+                        )
                         ListeExtincted.append(extinct_entry)
                 count = count + 1
 
@@ -730,27 +902,33 @@ def _ModelRun(
 
                     # Track extinction of initiator if count reaches zero
                     if ListePop[j][POP_COUNT] == 0:
-                        extinct_entry = [
-                            1,
-                            ListePop[j][POP_GENOTYPE],
-                            ListePop[j][POP_CELLS_TO_MUTATE],
-                            l * DT,
-                            ListePop[j][POP_ANCESTOR_ID],
-                            ListePop[j][POP_FUSION_COUNT],
-                            ListePop[j][POP_GENOTYPE_ID],
-                        ]
+                        extinct_entry = np.array(
+                            [
+                                1,
+                                ListePop[j][POP_GENOTYPE],
+                                ListePop[j][POP_CELLS_TO_MUTATE],
+                                l * DT,
+                                ListePop[j][POP_ANCESTOR_ID],
+                                ListePop[j][POP_FUSION_COUNT],
+                                ListePop[j][POP_GENOTYPE_ID],
+                            ],
+                            dtype=np.int64,
+                        )
                         ListeExtincted.append(extinct_entry)
 
                     if ListePop[neighbor][POP_COUNT] == 0:
-                        extinct_entry = [
-                            1,
-                            ListePop[neighbor][POP_GENOTYPE],
-                            ListePop[neighbor][POP_CELLS_TO_MUTATE],
-                            l * DT,
-                            ListePop[neighbor][POP_ANCESTOR_ID],
-                            ListePop[neighbor][POP_FUSION_COUNT],
-                            ListePop[neighbor][POP_GENOTYPE_ID],
-                        ]
+                        extinct_entry = np.array(
+                            [
+                                1,
+                                ListePop[neighbor][POP_GENOTYPE],
+                                ListePop[neighbor][POP_CELLS_TO_MUTATE],
+                                l * DT,
+                                ListePop[neighbor][POP_ANCESTOR_ID],
+                                ListePop[neighbor][POP_FUSION_COUNT],
+                                ListePop[neighbor][POP_GENOTYPE_ID],
+                            ],
+                            dtype=np.int64,
+                        )
                         ListeExtincted.append(extinct_entry)
 
                     Genotype2 = all_genotypes[ListePop[neighbor][POP_GENOTYPE]]
@@ -762,52 +940,64 @@ def _ModelRun(
                     exist = 0
                     count = 0
                     while count < len(ListePop) and exist == 0:
-                        if (
-                            convertBinaire(all_genotypes[ListePop[count][POP_GENOTYPE]])
-                            - convertBinaire(hybrid1)
-                            == 0
+                        if same_genotype(
+                            all_genotypes[ListePop[count][POP_GENOTYPE]], hybrid1
                         ):
-                            ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] + 1
+                            ListePop[count][POP_COUNT] += 1
                             exist = 1
                         count = count + 1
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
                         all_genotypes.append(hybrid1)
-                        hybrid_entry = [
-                            1,
-                            len(all_genotypes) - 1,  # genotype index
-                            0,
-                            l * DT,
-                            ListePop[j][POP_GENOTYPE_ID],
-                            0,
-                            genotypesCounts,
-                        ]  # New hybrid genotype!
+                        extra_death_by_genotype.append(
+                            genotype_extra_death(
+                                hybrid1, resistivity, treatment_base_extra
+                            )
+                        )
+                        hybrid_entry = np.array(
+                            [
+                                1,
+                                len(all_genotypes) - 1,
+                                0,
+                                l * DT,
+                                ListePop[j][POP_GENOTYPE_ID],
+                                0,
+                                genotypesCounts,
+                            ],
+                            dtype=np.int64,
+                        )
                         ListePop.append(hybrid_entry)
 
                     # Add second hybrid
                     exist = 0
                     count = 0
                     while count < len(ListePop) and exist == 0:
-                        if (
-                            convertBinaire(all_genotypes[ListePop[count][POP_GENOTYPE]])
-                            - convertBinaire(hybrid2)
-                            == 0
+                        if same_genotype(
+                            all_genotypes[ListePop[count][POP_GENOTYPE]], hybrid2
                         ):
-                            ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] + 1
+                            ListePop[count][POP_COUNT] += 1
                             exist = 1
                         count = count + 1
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
                         all_genotypes.append(hybrid2)
-                        hybrid_entry = [
-                            1,
-                            len(all_genotypes) - 1,  # genotype index
-                            0,
-                            l * DT,
-                            ListePop[j][POP_GENOTYPE_ID],
-                            0,
-                            genotypesCounts,
-                        ]  # New hybrid genotype!
+                        extra_death_by_genotype.append(
+                            genotype_extra_death(
+                                hybrid2, resistivity, treatment_base_extra
+                            )
+                        )
+                        hybrid_entry = np.array(
+                            [
+                                1,
+                                len(all_genotypes) - 1,
+                                0,
+                                l * DT,
+                                ListePop[j][POP_GENOTYPE_ID],
+                                0,
+                                genotypesCounts,
+                            ],
+                            dtype=np.int64,
+                        )
                         ListePop.append(hybrid_entry)
 
                     # Net population change: -2 (both parents) +2 (two hybrids) = 0 per fusion
@@ -830,36 +1020,50 @@ def _ModelRun(
             Simpson[l] = ComputeIndex(ListePop, 2)
             Score[l] = MaxScore(ListePop, all_genotypes)
             for i in range(0, len(ListeExtincted)):
-                lineage_data.append(
+                row = np.array(
                     [
                         l * DT,
                         1,
                         ListeExtincted[i][POP_GENOTYPE_ID],
                         ListeExtincted[i][POP_ANCESTOR_ID],
-                    ]
+                    ],
+                    dtype=np.int64,
                 )
+                lineage_data.append(row)
 
             for i in range(0, len(ListePop)):
-                lineage_data.append(
+                row = np.array(
                     [
                         l * DT,
                         ListePop[i][POP_COUNT],
                         ListePop[i][POP_GENOTYPE_ID],
                         ListePop[i][POP_ANCESTOR_ID],
-                    ]
+                    ],
+                    dtype=np.int64,
                 )
+                lineage_data.append(row)
 
-            metrics_data.append(
-                [l * DT, TotalCells[l], Number[l], Shanon[l], Simpson[l], Score[l]]
+            row = np.array(
+                [
+                    float(l * DT),
+                    float(TotalCells[l]),
+                    float(Number[l]),
+                    float(Shanon[l]),
+                    float(Simpson[l]),
+                    float(Score[l]),
+                ],
+                dtype=np.float64,
             )
+            metrics_data.append(row)
 
-            ListeExtincted = ListeExtincted[:0]  # Clear while preserving type
+            while len(ListeExtincted) > 0:
+                ListeExtincted.pop()  # Clear while preserving type
 
     # Return all collected data for file writing (as tuple for Numba compatibility)
     return lineage_data, metrics_data, all_genotypes
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     start = time.time()
 
     # Parse command-line arguments or use defaults

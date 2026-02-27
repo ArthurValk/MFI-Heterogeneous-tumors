@@ -4,10 +4,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+from dataclasses import dataclass
+from pathlib import Path
+
+
 @dataclass
 class ModelParameters:
     """Parameters of the experiment"""
 
+    # required (no defaults) FIRST
     number_of_genes: int
     carrying_capacity: int
     number_of_generations: int
@@ -16,12 +21,18 @@ class ModelParameters:
     growth_rate: float
     death_rate: float
     save_path: Path
-    # stepsize
+
+    # defaults AFTER
     dt: int = 1
-    # argument only relevant for NonSpatialFusionDiversity.py:
     diversity: int | None = None
-    # seed
     seed: int | None = None
+
+    # treatment controls (defaults AFTER required fields)
+    treatment_every: int | None = None  # e.g. 20 (off-treatment length)
+    treatment_duration: int = 0  # e.g. 20 (on-treatment length)
+
+    treatment_base_extra_death: float = 0.3  # flat extra death during treatment
+    treatment_selection: float = 0.1  # fraction of genes that confer resistance (10%)
 
 
 @dataclass(frozen=True)
