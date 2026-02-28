@@ -5,7 +5,6 @@ from typing import Literal
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-from matplotlib import use
 
 from parametrization import MetricNames
 

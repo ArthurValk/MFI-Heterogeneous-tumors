@@ -1,7 +1,5 @@
 """File to coordinate the running of experiments for the non-spatial model."""
 
-from pathlib import Path
-
 from non_spatial.NonSpatialFusion import ModelRun
 from non_spatial.parametrization import ModelParameters
 from output import OUTPUT_PATH
@@ -14,7 +12,7 @@ baseline_params = ModelParameters(
     fusion_rate=10**-2,
     growth_rate=0.5,
     death_rate=0.5,
-    save_path=Path(OUTPUT_PATH),
+    save_path=OUTPUT_PATH,
     treatment_every=20,
     treatment_duration=20,
     treatment_base_extra_death=0.3,

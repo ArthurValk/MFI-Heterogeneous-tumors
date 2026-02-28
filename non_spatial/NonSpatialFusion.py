@@ -10,11 +10,18 @@ import sys
 import os
 import csv
 
-from parametrization import (
-    ModelParameters,
-    ModelResult,
-    MetricNames,
-)
+try:
+    from parametrization import (
+        ModelParameters,
+        ModelResult,
+        MetricNames,
+    )
+except:
+    from non_spatial.parametrization import (
+        ModelParameters,
+        ModelResult,
+        MetricNames,
+    )
 
 
 # Field indices for population data tuples (used in _ModelRun with @njit)
@@ -610,7 +617,7 @@ def _ModelRun(
         Treatment is active from day treatment_every to treatment_every + treatment_duration
     treatment_duration : int, optional
         Duration of each treatment pulse (days)
-    treatment_base_extra_death : float, optional
+    treatment_base_extra : float, optional
         Base extra death rate during treatment before density scaling (default: 0.3)
     treatment_selection : float, optional
         Fraction of genes that confer resistance (0-1). These genes reduce treatment death
