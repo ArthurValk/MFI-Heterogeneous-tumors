@@ -4,10 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-from dataclasses import dataclass
-from pathlib import Path
-
-
 @dataclass
 class ModelParameters:
     """Parameters of the experiment"""
@@ -74,3 +70,11 @@ class MetricNames:
     cell_count = "TotalCells"
     genotype_id = "GenotypeId"
     ancestor_id = "AncestorId"
+
+    # monte carlo specific
+    seed = "seed"
+    births = "births"
+    deaths = "deaths"
+    fusions = "fusions"
+    mutations = "mutations"
+    genotype_array = "genotype_array"

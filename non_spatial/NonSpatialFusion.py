@@ -10,11 +10,18 @@ import sys
 import os
 import csv
 
-from parametrization import (
-    ModelParameters,
-    ModelResult,
-    MetricNames,
-)
+try:
+    from parametrization import (
+        ModelParameters,
+        ModelResult,
+        MetricNames,
+    )
+except:
+    from non_spatial.parametrization import (
+        ModelParameters,
+        ModelResult,
+        MetricNames,
+    )
 
 
 # Field indices for population data tuples (used in _ModelRun with @njit)
@@ -514,32 +521,6 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
     return model_result
 
 
-# Helper function for structured array operations
-def add_population_entry(arr, entry_tuple):
-    """
-    Add a new entry to a population structured array.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Structured array containing population data
-    entry_tuple : tuple
-        New entry to add, containing values for all fields
-        (count, genotype, cells_to_mutate, birth_time, ancestor_id, fusion_count, genotype_id)
-
-    Returns
-    -------
-    np.ndarray
-        New structured array with the entry appended
-    """
-    # Make a copy of genotype if it's an array
-    entry_list = list(entry_tuple)
-    if len(entry_list) > 1 and hasattr(entry_list[1], "copy"):
-        entry_list[1] = entry_list[1].copy()
-    new_entry = np.array([tuple(entry_list)], dtype=arr.dtype)
-    return np.concatenate([arr, new_entry])
-
-
 @njit
 def is_treatment_time(l: int, every: int, duration: int) -> bool:
     if every < 0 or duration <= 0:
@@ -610,7 +591,7 @@ def _ModelRun(
         Treatment is active from day treatment_every to treatment_every + treatment_duration
     treatment_duration : int, optional
         Duration of each treatment pulse (days)
-    treatment_base_extra_death : float, optional
+    treatment_base_extra : float, optional
         Base extra death rate during treatment before density scaling (default: 0.3)
     treatment_selection : float, optional
         Fraction of genes that confer resistance (0-1). These genes reduce treatment death
