@@ -1,21 +1,22 @@
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import shutil
-from typing import get_type_hints
 from dataclasses import fields, asdict
 import itertools
 import json
 import gc
+import os
 
 import numpy as np
 import polars as pl
-from numba import njit
 
 from non_spatial.NonSpatialFusion import _ModelRun
 from non_spatial.parametrization import ModelParameters, MetricNames
 
 
 class MonteCarloEngine:
+    """Monte Carlo simulation engine for non-spatial fusion model."""
+
     @staticmethod
     def monte_carlo_simulation(
         parameters: ModelParameters,
@@ -62,7 +63,9 @@ class MonteCarloEngine:
                     pf=parameters.fusion_rate,
                     growthRate=parameters.growth_rate,
                     deathRate=parameters.death_rate,
-                    diversity=parameters.diversity,
+                    diversity=parameters.diversity
+                    if parameters.diversity is not None
+                    else 0,
                     treatment_every=parameters.treatment_every
                     if parameters.treatment_every is not None
                     else -1,
@@ -233,7 +236,6 @@ class MonteCarloEngine:
         save_path.mkdir(parents=True, exist_ok=True)
 
         # Validate sweep_params keys against ModelParameters
-        type_hints = get_type_hints(ModelParameters)
         field_names = {f.name for f in fields(ModelParameters)}
         invalid_keys = set(sweep_params.keys()) - field_names
         if invalid_keys:
@@ -403,7 +405,9 @@ def _run_monte_carlo_simulation(
         )
 
     # Run simulations in parallel using ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=len(seeds)) as executor:
+    # Cap workers at CPU count to avoid thread overhead
+    max_workers = min(len(seeds), os.cpu_count() or 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(run_single_seed, seeds))
 
     # Unpack results
@@ -412,3 +416,6 @@ def _run_monte_carlo_simulation(
     all_genotypes_all = [r[2] for r in results]
 
     return lineage_data_all, metrics_data_all, all_genotypes_all
+
+
+# TODO: store chemotherapy periods to separate .csv/.parquet/.json to enhance plotting
