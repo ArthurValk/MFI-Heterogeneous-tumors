@@ -848,8 +848,6 @@ def _ModelRun(
                         ListePop[count][POP_FUSION_COUNT] = (
                             ListePop[count][POP_FUSION_COUNT] + 1
                         )
-                        ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] - 1
-                        TotalPopulation = TotalPopulation - 1
 
                     if ListePop[count][POP_COUNT] == 0:
                         extinct_entry = np.array(
