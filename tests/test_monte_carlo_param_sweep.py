@@ -2,7 +2,7 @@
 
 import marimo
 
-__generated_with = "0.20.2"
+__generated_with = "0.20.4"
 app = marimo.App()
 
 
@@ -38,7 +38,7 @@ def _(ModelParameters, TEST_OUTPUT_PATH, marimo):
     # Define parameter sweep configuration
     marimo.md("## Parameter Sweep Configuration")
 
-    output_dir = TEST_OUTPUT_PATH / "param_sweep"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_3"
 
     # Base parameters (fixed for all sweep combinations)
     base_params = ModelParameters(
@@ -59,11 +59,17 @@ def _(ModelParameters, TEST_OUTPUT_PATH, marimo):
 
     # Define parameter sweep ranges (5 dimensions × 3 values = 243 combinations)
     sweep_params = {
-        "mutation_rate_per_gene": np.array([1e-4, 1e-3, 1e-2]),
-        "fusion_rate": np.array([1e-4, 1e-3, 1e-2]),
-        "treatment_selection": np.array([0.001, 0.01, 0.1]),
-        "treatment_every": np.array([5, 20, 200]),
-        "treatment_cell_density_dependence": np.array([0.0, 1.0, 10.0]),
+        "mutation_rate_per_gene": np.array(
+            [
+                1e-6,
+                1e-5,
+                1e-4,
+            ]
+        ),
+        # "fusion_rate": np.array([1e-4, 1e-3, 1e-2]),
+        # "treatment_selection": np.array([0.001, 0.01, 0.1]),
+        # "treatment_every": np.array([5, 20, 200]),
+        # "treatment_cell_density_dependence": np.array([0.0, 1.0, 10.0]),
     }
 
     marimo.md(f"**Fixed Parameters:**")
@@ -102,7 +108,6 @@ def _(MonteCarloEngine, base_params, marimo, output_dir, sweep_params):
             seeds=seeds,
             sweep_params=sweep_params,
             save_path=output_dir,
-            batch_size=10,  # Smaller batch size for memory efficiency
         )
         marimo.md("✅ Parameter sweep completed!")
         sweep_status = "✅ Completed"
@@ -247,3 +252,5 @@ def _(MetricNames, all_metrics, marimo, pl):
 
 if __name__ == "__main__":
     app.run()
+
+# TODO: further refine this code

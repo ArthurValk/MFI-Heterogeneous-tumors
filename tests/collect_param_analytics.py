@@ -13,11 +13,13 @@ for combo_dir in sorted(param_sweep_dir.iterdir()):
     if combo_dir.is_dir():
         mtime = combo_dir.stat().st_mtime
         mtime_dt = datetime.fromtimestamp(mtime)
-        combos.append({
-            "name": combo_dir.name,
-            "timestamp": mtime,
-            "datetime": mtime_dt.isoformat(),
-        })
+        combos.append(
+            {
+                "name": combo_dir.name,
+                "timestamp": mtime,
+                "datetime": mtime_dt.isoformat(),
+            }
+        )
 
 # Sort by timestamp to get execution order
 combos.sort(key=lambda x: x["timestamp"])
@@ -40,19 +42,32 @@ slowest = sorted(combos, key=lambda x: x.get("duration_seconds", 0), reverse=Tru
 # Write to CSV
 with open("param_analytics.csv", "w", newline="") as f:
     writer = csv.writer(f)
-    writer.writerow(["rank", "execution_order", "parameter_combination", "duration_minutes", "duration_seconds", "completed_at"])
+    writer.writerow(
+        [
+            "rank",
+            "execution_order",
+            "parameter_combination",
+            "duration_minutes",
+            "duration_seconds",
+            "completed_at",
+        ]
+    )
 
     for rank, combo in enumerate(slowest, 1):
         # Find execution order
-        exec_order = next(i + 1 for i, c in enumerate(combos) if c["name"] == combo["name"])
-        writer.writerow([
-            rank,
-            exec_order,
-            combo["name"],
-            combo.get("duration_minutes", ""),
-            round(combo.get("duration_seconds", 0), 1),
-            combo["datetime"],
-        ])
+        exec_order = next(
+            i + 1 for i, c in enumerate(combos) if c["name"] == combo["name"]
+        )
+        writer.writerow(
+            [
+                rank,
+                exec_order,
+                combo["name"],
+                combo.get("duration_minutes", ""),
+                round(combo.get("duration_seconds", 0), 1),
+                combo["datetime"],
+            ]
+        )
 
 # Write summary to txt
 with open("param_analytics.txt", "w") as f:

@@ -249,17 +249,7 @@ class MonteCarloEngine:
         param_values = [sweep_params[name] for name in param_names]
         combinations = list(itertools.product(*param_values))
 
-        # Store metadata about the sweep
-        sweep_metadata = {
-            "param_names": param_names,
-            "param_grids": {name: sweep_params[name].tolist() for name in param_names},
-            "num_combinations": len(combinations),
-            "num_seeds": len(seeds),
-            "total_runs": len(combinations) * len(seeds),
-        }
-
         # Run each parameter combination
-        results_dirs = []
         for combo_idx, combo_values in enumerate(combinations):
             # Create a copy of base parameters
             combo_params = _update_model_parameters(
@@ -281,21 +271,22 @@ class MonteCarloEngine:
                 batch_size=batch_size,
             )
 
-            results_dirs.append(
-                {
-                    "combination": {
-                        name: float(val) for name, val in zip(param_names, combo_values)
-                    },
-                    "output_dir": str(combo_dir),
-                }
-            )
+            # Add parameter columns to all output parquet files for efficient filtering
+            _add_parameter_columns_to_outputs(combo_dir, param_names, combo_values)
 
             # Clean up between parameter combinations
             del combo_params, combo_dir
             gc.collect()
 
+        # Store metadata about the sweep (machine-independent)
+        sweep_metadata = {
+            "param_grids": {name: sweep_params[name].tolist() for name in param_names},
+            "num_combinations": len(combinations),
+            "num_seeds": len(seeds),
+            "total_runs": len(combinations) * len(seeds),
+        }
+
         # Save sweep metadata
-        sweep_metadata["results"] = results_dirs
         metadata_path = save_path / "sweep_metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(sweep_metadata, f, indent=2)
@@ -416,6 +407,41 @@ def _run_monte_carlo_simulation(
     all_genotypes_all = [r[2] for r in results]
 
     return lineage_data_all, metrics_data_all, all_genotypes_all
+
+
+def _add_parameter_columns_to_outputs(
+    output_dir: Path,
+    param_names: list[str],
+    param_values: tuple,
+) -> None:
+    """Add parameter columns to all output parquet files.
+
+    Parameters
+    ----------
+    output_dir : Path
+        Directory containing metrics_data.parquet, lineage_data.parquet, genotypes_data.parquet
+    param_names : list[str]
+        Names of the parameters being varied
+    param_values : tuple
+        Values of the parameters for this combination
+    """
+    # Files to augment with parameter columns
+    output_files = [
+        "metrics_data.parquet",
+        "lineage_data.parquet",
+        "genotypes_data.parquet",
+    ]
+
+    for filename in output_files:
+        filepath = output_dir / filename
+        if filepath.exists():
+            df = pl.read_parquet(filepath)
+            # Add parameter columns
+            for param_name, param_value in zip(param_names, param_values):
+                df = df.with_columns(pl.lit(param_value).alias(param_name))
+            df.write_parquet(filepath)
+            del df
+            gc.collect()
 
 
 # TODO: store chemotherapy periods to separate .csv/.parquet/.json to enhance plotting

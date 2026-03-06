@@ -32,16 +32,18 @@ def _(ModelParameters, OUTPUT_PATH, marimo):
     params = ModelParameters(
         number_of_genes=100,
         carrying_capacity=1000,
-        dt=0.08,
-        number_of_generations=5000,
-        mutation_rate_per_gene=1e-4,
-        fusion_rate=1e-4,
-        growth_rate=0.12,
-        death_rate=0.08,
-        save_path=OUTPUT_PATH,
-        treatment_every=500,
-        treatment_duration=500,
-        treatment_base_extra_death=0.1,
+        dt=1,  # 1 hour per generation
+        number_of_generations=4320,  # 180 days * 24 hours
+        mutation_rate_per_gene=5.2e-5,  # Rescaled from 1e-4 (factor: 1/1.92)
+        fusion_rate=5.2e-5,  # Rescaled from 1e-4 (factor: 1/1.92)
+        growth_rate=0.02,  # birth = 1.5 * death, birth - death = 0.08/12
+        death_rate=0.08 / 6,  # death = 0.08/12 / 0.5 = 0.08/6
+        save_path=output_dir,
+        treatment_every=156,  # 20*24 - 2 (hours between treatments)
+        treatment_duration=12,  # 2 hours
+        treatment_base_extra_death=2
+        * 0.16
+        / 12,  # mean 0.16 per 12 hours, therefore max=2*0.16
         treatment_selection=0.1,
     )
 

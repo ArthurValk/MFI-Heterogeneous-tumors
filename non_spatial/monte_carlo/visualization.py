@@ -1,7 +1,7 @@
 """Visualization utilities for Monte Carlo simulation results."""
 
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, Sequence
 
 import numpy as np
 import polars as pl
@@ -11,6 +11,20 @@ import matplotlib.figure
 from scipy import stats
 
 from non_spatial.parametrization import MetricNames
+
+# Standard matplotlib colors for plotting
+COLORS = [
+    "#1f77b4",  # blue
+    "#ff7f0e",  # orange
+    "#2ca02c",  # green
+    "#d62728",  # red
+    "#9467bd",  # purple
+    "#8c564b",  # brown
+    "#e377c2",  # pink
+    "#7f7f7f",  # gray
+    "#bcbd22",  # olive
+    "#17becf",  # cyan
+]
 
 
 class MCVisualization:
@@ -226,25 +240,22 @@ class MCVisualization:
 
     @staticmethod
     def plot_temporal_trend(
-        metrics_df: pl.DataFrame,
+        metrics_df: pl.DataFrame | Sequence[pl.DataFrame],
         metric: str,
-        seed: Optional[int] = None,
         ax: Optional[matplotlib.axes.Axes] = None,
         percentile: float = 5.0,
     ) -> matplotlib.axes.Axes:
-        """Plot temporal trend of a metric across time (single or all seeds).
+        """Plot temporal trend of a metric across time with mean and quantiles.
 
-        For all seeds: shows mean line with percentile band (e.g., 5th-95th percentile).
-        For single seed: shows the trajectory for that specific seed.
+        For single dataframe: shows mean line with percentile band across all seeds.
+        For multiple experiments: shows mean and quantiles across experiment summaries.
 
         Parameters
         ----------
-        metrics_df : pl.DataFrame
-            Metrics dataframe
+        metrics_df : pl.DataFrame | Sequence[pl.DataFrame]
+            Single metrics dataframe or sequence of dataframes (from multiple experiments)
         metric : str
             Column name to plot
-        seed : int, optional
-            Specific seed to plot. If None, plots all seeds with percentile bands.
         ax : matplotlib.axes.Axes, optional
             Axes to plot on (creates new if None)
         percentile : float, optional
@@ -258,19 +269,14 @@ class MCVisualization:
         if ax is None:
             _, ax = plt.subplots(figsize=(10, 6))
 
-        if seed is not None:
-            # Plot single seed
-            seed_data = metrics_df.filter(pl.col(MetricNames.seed) == seed).sort(
-                MetricNames.time
-            )
-            times = seed_data[MetricNames.time].to_numpy()
-            values = seed_data[metric].to_numpy()
-            ax.plot(times, values, linewidth=2, label=f"Seed {seed}")
-        else:
-            # Filter out NaN and Inf values before computing statistics
-            clean_data = metrics_df.filter(pl.col(metric).is_finite())
+        # Handle both single and multiple dataframes uniformly
+        dfs = [metrics_df] if isinstance(metrics_df, pl.DataFrame) else list(metrics_df)
 
-            # Plot all seeds with percentile bands and mean
+        # Plot each dataframe with its own color
+        for idx, df in enumerate(dfs):
+            clean_data = df.filter(pl.col(metric).is_finite())
+
+            # Compute mean and quantiles across seeds at each time point
             grouped = (
                 clean_data.sort(MetricNames.time)
                 .group_by(MetricNames.time)
@@ -291,18 +297,28 @@ class MCVisualization:
             values_lower = grouped["lower"].to_numpy()
             values_upper = grouped["upper"].to_numpy()
 
+            # Use color from COLORS list, cycling if necessary
+            color = COLORS[idx % len(COLORS)]
+
             # Plot percentile band
             ax.fill_between(
                 times,
                 values_lower,
                 values_upper,
-                alpha=0.3,
-                color="steelblue",
-                label=f"{percentile:.0f}th-{100.0 - percentile:.0f}th percentile",
+                alpha=0.2,
+                color=color,
+                label=f"Exp {idx + 1}: {percentile:.0f}th-{100.0 - percentile:.0f}th percentile",
             )
 
             # Plot mean line
-            ax.plot(times, values_mean, "r-", linewidth=2.5, label="Mean", zorder=10)
+            ax.plot(
+                times,
+                values_mean,
+                color=color,
+                linewidth=2.5,
+                label=f"Exp {idx + 1}: Mean",
+                zorder=10,
+            )
 
         ax.set_xlabel("Time", fontsize=11)
         ax.set_ylabel(metric, fontsize=11)
@@ -315,4 +331,3 @@ class MCVisualization:
 
 # TODO: Implement plotting lineage decomposition (requires change to data returned in NonSpatialFusion.py)
 # TODO: implement method to plot empirical pdfs of parameter sweep
-# TODO: Implement method to compare results of n different simulations (e.g. comparing run with fusion vs. without, with chemotherapy vs. without)
