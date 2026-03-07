@@ -26,38 +26,17 @@ def _():
 
 @app.cell
 def _(TEST_OUTPUT_PATH, mo):
-    import json
-
-    mo.md("## Parameter Sweep Analysis")
-    mo.md("Load results from completed parameter sweep")
-
     output_dir = TEST_OUTPUT_PATH / "param_sweep_3"
-    metadata_file = output_dir / "sweep_metadata.json"
+    from non_spatial.monte_carlo.monte_carlo import _load_metadata
 
-    metadata = {}
-    if metadata_file.exists():
-        with open(metadata_file) as f:
-            metadata = json.load(f)
+    metadata = _load_metadata(output_dir)
 
-    _status = (
-        mo.md(
-            f"""✅ Sweep metadata found
-    - Combinations: {metadata.get("num_combinations", "N/A")}
-    - Seeds per combination: {metadata.get("num_seeds", "N/A")}
-    - Total runs: {metadata.get("total_runs", "N/A")}"""
-        )
-        if metadata
-        else mo.md(f"❌ No sweep_metadata.json found at {output_dir}")
-    )
-    _status
+    mo.md("Loaded metadata")
     return metadata, output_dir
 
 
 @app.cell
 def _(metadata, mo):
-    mo.md("## Parameter Selection")
-    mo.md("Select parameter values for filtering (all sliders are always set):")
-
     # Get parameter ranges from metadata
     param_ranges = metadata.get("param_grids", {})
 
@@ -77,9 +56,7 @@ def _(mo, param_sliders):
 
 
 @app.cell
-def _(mo, output_dir, param_ranges, param_sliders, pl):
-    mo.md("## Find Matching Parameter Combination")
-
+def _(output_dir, param_ranges, param_sliders, pl):
     # Get selected values by zipping sorted param names with sliders
     selected_params = {}
     for (_param_name, _param_values), _slider in zip(
@@ -88,24 +65,18 @@ def _(mo, output_dir, param_ranges, param_sliders, pl):
         selected_params[_param_name] = _slider.value
 
     # Lazily scan all metrics files and filter by selected parameters
-    _lazy_metrics = pl.scan_parquet(str(output_dir / "**" / "metrics_data.parquet"))
+    from non_spatial.monte_carlo.monte_carlo import _load_results_lazily
 
-    # Apply filters for each selected parameter
-    _filtered_lazy = _lazy_metrics
+    _lazy_metrics = _load_results_lazily(save_path=output_dir, data_source="metrics")
+
     for _param_name, _param_val in selected_params.items():
-        _filtered_lazy = _filtered_lazy.filter(pl.col(_param_name) == _param_val)
+        _filtered_lazy = _lazy_metrics.filter(pl.col(_param_name) == _param_val)
 
-    filtered_metrics = _filtered_lazy.collect()
+    filtered_metrics = _lazy_metrics.collect()
 
     if len(filtered_metrics) == 0:
         filtered_metrics = None
 
-    _status = (
-        mo.md(f"✅ Found metrics matching selected parameters")
-        if filtered_metrics is not None
-        else mo.md("❌ No metrics found matching selected parameters")
-    )
-    _status
     return (filtered_metrics,)
 
 
@@ -127,10 +98,36 @@ def _(filtered_metrics, mo):
 
 
 @app.cell
+def _(MetricNames, filtered_metrics):
+    """Compute available times from filtered metrics."""
+    available_times_filtered = (
+        sorted(filtered_metrics[MetricNames.time].unique().to_list())
+        if (
+            filtered_metrics is not None
+            and MetricNames.time in filtered_metrics.columns
+        )
+        else []
+    )
+
+    return (available_times_filtered,)
+
+
+@app.cell
+def _(available_times_filtered, mo):
+    time_slider_filtered = mo.ui.slider(
+        steps=available_times_filtered if available_times_filtered else [],
+        label="Select timepoint for empirical distributions:",
+        value=available_times_filtered[len(available_times_filtered) // 2],
+    )
+    return (time_slider_filtered,)
+
+
+@app.cell
 def _(MCVisualization, MetricNames, filtered_metrics, mo, plt):
     mo.md("## Filtered Metrics Visualization")
 
     if filtered_metrics is not None and len(filtered_metrics) > 0:
+        mo.md("### Temporal Trends")
         _metrics_to_viz = [
             MetricNames.total_cells,
             MetricNames.num_genotypes,
@@ -161,6 +158,40 @@ def _(MCVisualization, MetricNames, filtered_metrics, mo, plt):
         )
     )
     _output
+    return
+
+
+@app.cell
+def _(mo, time_slider_filtered):
+    mo.md("""Select time point for empirical distributions:""")
+    mo.hstack([time_slider_filtered])
+    return
+
+
+@app.cell
+def _(
+    MCVisualization,
+    MetricNames,
+    filtered_metrics,
+    mo,
+    time_slider_filtered,
+):
+    # Empirical distributions at selected time:
+    mo.md("### Metric Distributions at Selected Time")
+    _selected_time = time_slider_filtered.value
+    _metrics_to_plot = [
+        (MetricNames.total_cells, "float"),
+        (MetricNames.num_genotypes, "integer"),
+        (MetricNames.shannon_index, "float"),
+        (MetricNames.max_mutations, "integer"),
+    ]
+    _dist_fig = MCVisualization.plot_metric_distributions_at_time(
+        filtered_metrics,
+        _selected_time,
+        metrics_to_plot=_metrics_to_plot,
+        figsize=(12, 8),
+    )
+    _dist_fig
     return
 
 
@@ -230,14 +261,59 @@ def _(MetricNames, all_metrics, mo, pl):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, all_metrics, mo, plt):
+def _(metadata, mo):
+    import itertools
+
+    mo.md("## Filter Parameter Combinations for Comparison")
+
+    # Reconstruct combinations from metadata
+    param_grids = metadata.get("param_grids", {})
+    param_names = sorted(param_grids.keys())
+    param_values_lists = [param_grids[name] for name in param_names]
+    _all_combinations = list(itertools.product(*param_values_lists))
+
+    # Format option labels
+    _combo_labels = []
+    for _combo_vals in _all_combinations:
+        _label = ", ".join(
+            f"{name}={val:.4g}" for name, val in zip(param_names, _combo_vals)
+        )
+        _combo_labels.append(_label)
+
+    # Create multiselect with first combination selected by default
+    combo_multiselect = mo.ui.multiselect(
+        options=_combo_labels,
+        value=[_combo_labels[0]] if _combo_labels else [],
+        label="Select parameter combinations to compare:",
+    )
+    return (combo_multiselect,)
+
+
+@app.cell
+def _(combo_multiselect, mo):
+    mo.md("""Select which combinations to plot:""")
+    mo.vstack([combo_multiselect])
+    return
+
+
+@app.cell
+def _(MCVisualization, MetricNames, all_metrics, combo_multiselect, mo, plt):
     mo.md("## Population Dynamics Across All Combinations")
 
+    # Filter all_metrics by selected combinations
+    _selected_combos = combo_multiselect.value if combo_multiselect.value else []
+    _filtered_metrics = {
+        _name: _df
+        for _name, _df in all_metrics.items()
+        if any(_combo in _name for _combo in _selected_combos)
+    }
+
     if (
-        all_metrics
-        and MetricNames.total_cells in all_metrics[list(all_metrics.keys())[0]].columns
+        _filtered_metrics
+        and MetricNames.total_cells
+        in _filtered_metrics[list(_filtered_metrics.keys())[0]].columns
     ):
-        _dfs = list(all_metrics.values())
+        _dfs = list(_filtered_metrics.values())
         _metrics_to_plot = [
             MetricNames.total_cells,
             MetricNames.num_genotypes,
@@ -258,17 +334,6 @@ def _(MCVisualization, MetricNames, all_metrics, mo, plt):
 
         plt.tight_layout()
         plt.show()
-
-    _plot_status = (
-        None
-        if (
-            all_metrics
-            and MetricNames.total_cells
-            in all_metrics[list(all_metrics.keys())[0]].columns
-        )
-        else mo.md("Cannot create plots - required columns not found")
-    )
-    _plot_status
     return
 
 
@@ -303,10 +368,24 @@ def _(mo, time_slider):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, all_metrics, mo, plt, time_slider):
+def _(
+    MCVisualization,
+    MetricNames,
+    all_metrics,
+    combo_multiselect,
+    mo,
+    plt,
+    time_slider,
+):
     mo.md("## Final State Distributions")
 
-    if all_metrics and time_slider.value is not None:
+    _selected_combos = combo_multiselect.value if combo_multiselect.value else []
+    _filtered_metrics = {
+        _name: _df
+        for _name, _df in all_metrics.items()
+        if any(_combo in _name for _combo in _selected_combos)
+    }
+    if _filtered_metrics and time_slider.value is not None:
         _selected_time = time_slider.value
         _metrics_to_plot = [
             (MetricNames.total_cells, "float"),
@@ -316,7 +395,7 @@ def _(MCVisualization, MetricNames, all_metrics, mo, plt, time_slider):
         ]
 
         # Show distributions for each parameter combination at selected time
-        for _combo_name, _df in sorted(all_metrics.items()):
+        for _combo_name, _df in sorted(_filtered_metrics.items()):
             if MetricNames.time in _df.columns:
                 _fig = MCVisualization.plot_metric_distributions_at_time(
                     _df,
@@ -325,13 +404,6 @@ def _(MCVisualization, MetricNames, all_metrics, mo, plt, time_slider):
                     figsize=(12, 8),
                 )
                 plt.show()
-
-    _dist_status = (
-        None
-        if (all_metrics and time_slider.value is not None)
-        else mo.md("No metrics data available or no time selected")
-    )
-    _dist_status
     return
 
 
@@ -372,7 +444,7 @@ def _(MetricNames, all_metrics, mo, pl):
     )
 
     if _extinction_analysis:
-        mo.md(f"**Tumor extinction rates across parameter combinations:**")
+        mo.md("**Tumor extinction rates across parameter combinations:**")
 
     _extinction_df
     return
@@ -380,6 +452,3 @@ def _(MetricNames, all_metrics, mo, pl):
 
 if __name__ == "__main__":
     app.run()
-
-# TODO: filter on specific parameters before showing plot
-# TODO: further refine this code

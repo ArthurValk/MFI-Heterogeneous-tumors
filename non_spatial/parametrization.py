@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass
@@ -32,6 +33,24 @@ class ModelParameters:
     treatment_cell_density_dependence: float = (
         0.0  # scaling factor for cell density effects on treatment efficacy
     )
+
+
+ModelParametersTyping = Literal[
+    "number_of_genes",
+    "carrying_capacity",
+    "number_of_generations",
+    "mutation_rate_per_gene",
+    "fusion_rate",
+    "growth_rate",
+    "death_rate",
+    "dt",
+    "diversity",
+    "treatment_every",
+    "treatment_duration",
+    "treatment_base_extra_death",
+    "treatment_selection",
+    "treatment_cell_density_dependence",
+]
 
 
 @dataclass(frozen=True)

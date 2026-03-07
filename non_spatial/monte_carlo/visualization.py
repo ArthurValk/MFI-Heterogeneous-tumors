@@ -327,7 +327,3 @@ class MCVisualization:
         ax.legend()
 
         return ax
-
-
-# TODO: Implement plotting lineage decomposition (requires change to data returned in NonSpatialFusion.py)
-# TODO: implement method to plot empirical pdfs of parameter sweep

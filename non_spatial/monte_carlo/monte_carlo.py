@@ -6,6 +6,7 @@ import itertools
 import json
 import gc
 import os
+from typing import Literal
 
 import numpy as np
 import polars as pl
@@ -292,6 +293,20 @@ class MonteCarloEngine:
             json.dump(sweep_metadata, f, indent=2)
 
 
+class OutputFiles:
+    """Constants for output file names."""
+
+    lineage = "lineage_data.parquet"
+    metrics = "metrics_data.parquet"
+    genotypes = "genotypes_data.parquet"
+
+
+OutputFilesTyping = Literal["lineage", "metrics", "genotypes"]
+
+
+SWEEP_METADATA_FILE = "sweep_metadata.json"
+
+
 def _update_model_parameters(
     base_params: ModelParameters,
     param_names: list[str],
@@ -375,6 +390,8 @@ def _run_monte_carlo_simulation(
     treatment_cell_density_dependence: float,
     seeds: list[int],
 ) -> tuple[list, list, list]:
+    """Run Monte Carlo simulations for a list of seeds in parallel."""
+
     def run_single_seed(seed: int):
         """Run a single model with the given seed."""
         np.random.seed(int(seed))
@@ -427,9 +444,9 @@ def _add_parameter_columns_to_outputs(
     """
     # Files to augment with parameter columns
     output_files = [
-        "metrics_data.parquet",
-        "lineage_data.parquet",
-        "genotypes_data.parquet",
+        OutputFiles.metrics,
+        OutputFiles.lineage,
+        OutputFiles.genotypes,
     ]
 
     for filename in output_files:
@@ -444,4 +461,38 @@ def _add_parameter_columns_to_outputs(
             gc.collect()
 
 
-# TODO: store chemotherapy periods to separate .csv/.parquet/.json to enhance plotting
+def _load_results_lazily(
+    data_source: OutputFilesTyping,
+    save_path: Path,
+) -> pl.LazyFrame:
+    """Loading results lazily from parquet files for efficient filtering and analysis."""
+    return pl.scan_parquet(
+        save_path / "**" / getattr(OutputFiles, data_source) / "*.parquet"
+    )
+
+
+def _load_metadata(save_path: Path, file_name: str = SWEEP_METADATA_FILE) -> dict:
+    """Load sweep metadata from JSON file."""
+    metadata_file = save_path / file_name
+    if metadata_file.exists():
+        with open(metadata_file) as f:
+            return json.load(f)
+
+    else:
+        raise FileNotFoundError(f"Sweep metadata file not found at {metadata_file}")
+
+
+def _get_parameter_combinations_from_metadata(metadata: dict) -> list[dict[str, float]]:
+    """Generate list of parameter combinations from sweep metadata."""
+    param_grids = metadata.get("param_grids", {})
+    if not param_grids:
+        raise ValueError("No parameter grids found in metadata")
+
+    param_names = sorted(param_grids.keys())
+    param_values = [param_grids[name] for name in param_names]
+    combinations = list(itertools.product(*param_values))
+
+    return [
+        {name: value for name, value in zip(param_names, combo_values)}
+        for combo_values in combinations
+    ]
