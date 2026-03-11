@@ -478,19 +478,3 @@ def _load_metadata(save_path: Path, file_name: str = SWEEP_METADATA_FILE) -> dic
 
     else:
         raise FileNotFoundError(f"Sweep metadata file not found at {metadata_file}")
-
-
-def _get_parameter_combinations_from_metadata(metadata: dict) -> list[dict[str, float]]:
-    """Generate list of parameter combinations from sweep metadata."""
-    param_grids = metadata.get("param_grids", {})
-    if not param_grids:
-        raise ValueError("No parameter grids found in metadata")
-
-    param_names = sorted(param_grids.keys())
-    param_values = [param_grids[name] for name in param_names]
-    combinations = list(itertools.product(*param_values))
-
-    return [
-        {name: value for name, value in zip(param_names, combo_values)}
-        for combo_values in combinations
-    ]

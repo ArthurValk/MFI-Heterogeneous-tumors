@@ -1,4 +1,10 @@
-"""marimo edit tests/test_monte_carlo_param_sweep_analysis.py"""
+"""marimo run notebooks/monte_carlo/monte_carlo_param_sweep_analysis.py
+
+Note: this code is designed to analyze the results of a Monte Carlo parameter sweep performed by `notebooks/monte_carlo_param_sweep.py`.
+To visualize the results, set the 'output_dir' to the directory containing the results from the sweep, and run this notebook.
+
+If you have not yet performed the parameter sweep, you can run `notebooks/monte_carlo_param_sweep.py` first to generate the necessary output data for analysis.
+"""
 
 import marimo
 
