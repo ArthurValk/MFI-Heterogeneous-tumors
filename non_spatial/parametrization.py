@@ -48,6 +48,7 @@ ModelParametersTyping = Literal[
     "growth_rate",
     "death_rate",
     "diversity",
+    "initial_population_size",
     "treatment_injection_every",
     "treatment_initial_concentration",
     "treatment_halflife",

@@ -1,12 +1,11 @@
 {
   "param_grids": {
     "mutation_rate_per_gene": [
-      1e-06,
-      1e-05,
-      0.0001
+      0.0001,
+      1e-05
     ]
   },
-  "num_combinations": 3,
+  "num_combinations": 2,
   "num_seeds": 300,
-  "total_runs": 900
+  "total_runs": 600
 }

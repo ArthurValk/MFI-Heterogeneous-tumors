@@ -70,7 +70,7 @@ def _(ModelParameters, ModelParametersTyping, TEST_OUTPUT_PATH, marimo):
         treatment_resistivity=1.0,
     )
     sweep_params: dict[ModelParametersTyping, np.ndarray] = {
-        "mutation_rate_per_gene": np.array([1e-4]),
+        "mutation_rate_per_gene": np.array([1e-4, 1e-5]),
     }
 
     from typing import get_args

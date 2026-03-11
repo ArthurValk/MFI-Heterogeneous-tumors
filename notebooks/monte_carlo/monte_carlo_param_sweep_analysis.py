@@ -25,15 +25,15 @@ def _():
 
     from non_spatial.parametrization import MetricNames
     from non_spatial.monte_carlo.visualization import MCVisualization
-    from tests.test_output import TEST_OUTPUT_PATH
+    from tests.test_files.test_monte_carlo import TEST_MC_PATH
     import polars as pl
 
-    return MCVisualization, MetricNames, TEST_OUTPUT_PATH, mo, pl, plt
+    return MCVisualization, MetricNames, TEST_MC_PATH, mo, pl, plt
 
 
 @app.cell
-def _(TEST_OUTPUT_PATH, mo):
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_4"
+def _(TEST_MC_PATH, mo):
+    output_dir = TEST_MC_PATH / "param_sweep_4"
     from non_spatial.monte_carlo.monte_carlo import _load_metadata
 
     metadata = _load_metadata(output_dir)

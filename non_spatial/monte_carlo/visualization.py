@@ -78,7 +78,7 @@ class MCVisualization:
         return sorted(metrics_df[MetricNames.time].unique().to_list())
 
     @staticmethod
-    def get_metrics_at_time(metrics_df: pl.DataFrame, time: int) -> pl.DataFrame:
+    def get_metrics_at_time(metrics_df: pl.DataFrame, time: int | float) -> pl.DataFrame:
         """Filter metrics dataframe to a specific timepoint.
 
         Parameters
