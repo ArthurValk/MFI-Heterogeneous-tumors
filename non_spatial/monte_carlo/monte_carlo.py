@@ -36,7 +36,7 @@ class MonteCarloEngine:
         save_path : Path
             Directory to save results
         batch_size : int, optional
-            Number of seeds to process in parallel per batch (default: 10000)
+            Number of seeds to process in parallel per batch
         """
         save_path = Path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
@@ -53,12 +53,12 @@ class MonteCarloEngine:
             end_idx = min(start_idx + batch_size, len(seeds))
             batch_seeds = seeds[start_idx:end_idx]
 
-            # Run batch in parallel
             lineage_data_all, metrics_data_all, all_genotypes_all = (
                 _run_monte_carlo_simulation(
                     Ngenes=parameters.number_of_genes,
                     NgenerationsMax=parameters.number_of_generations,
                     DT=parameters.dt,
+                    DATA_RESOLUTION=parameters.data_resolution,
                     KC=parameters.carrying_capacity,
                     pm=parameters.mutation_rate_per_gene,
                     pf=parameters.fusion_rate,
@@ -67,13 +67,17 @@ class MonteCarloEngine:
                     diversity=parameters.diversity
                     if parameters.diversity is not None
                     else 0,
-                    treatment_every=parameters.treatment_every
-                    if parameters.treatment_every is not None
+                    initial_population_size=parameters.initial_population_size,
+                    treatment_injection_every=parameters.treatment_injection_every
+                    if parameters.treatment_injection_every is not None
                     else -1,
-                    treatment_duration=parameters.treatment_duration,
-                    treatment_base_extra=parameters.treatment_base_extra_death,
+                    treatment_initial_concentration=parameters.treatment_initial_concentration,
+                    treatment_halflife=parameters.treatment_halflife,
+                    treatment_concentration_to_extra_death=(
+                        parameters.treatment_concentration_to_extra_death
+                    ),
                     treatment_selection=parameters.treatment_selection,
-                    treatment_cell_density_dependence=parameters.treatment_cell_density_dependence,
+                    treatment_resistivity=parameters.treatment_resistivity,
                     seeds=batch_seeds,
                 )
             )
@@ -81,9 +85,9 @@ class MonteCarloEngine:
             # Flatten results from this batch (vectorized for speed)
             lineage_seed_ids = []
             lineage_times = []
-            lineage_births = []
-            lineage_deaths = []
-            lineage_fusions = []
+            lineage_cell_counts = []
+            lineage_genotype_ids = []
+            lineage_ancestor_ids = []
 
             metrics_seed_ids = []
             metrics_times = []
@@ -92,6 +96,8 @@ class MonteCarloEngine:
             metrics_shannon = []
             metrics_simpson = []
             metrics_max_mutations = []
+            metrics_drug_concentration = []
+            metrics_drug_extra_death_wt = []
 
             genotype_seed_ids = []
             genotype_ids = []
@@ -103,20 +109,22 @@ class MonteCarloEngine:
                 if lineage_data_all[i]:
                     lineage_array = np.array(lineage_data_all[i])
                     lineage_seed_ids.extend([seed] * len(lineage_array))
-                    lineage_times.extend(lineage_array[:, 0].astype(int))
-                    lineage_births.extend(lineage_array[:, 1].astype(int))
-                    lineage_deaths.extend(lineage_array[:, 2].astype(int))
-                    lineage_fusions.extend(lineage_array[:, 3].astype(int))
+                    lineage_times.extend(lineage_array[:, 0].astype(float))
+                    lineage_cell_counts.extend(lineage_array[:, 1].astype(int))
+                    lineage_genotype_ids.extend(lineage_array[:, 2].astype(int))
+                    lineage_ancestor_ids.extend(lineage_array[:, 3].astype(int))
 
                 if metrics_data_all[i]:
                     metrics_array = np.array(metrics_data_all[i])
                     metrics_seed_ids.extend([seed] * len(metrics_array))
-                    metrics_times.extend(metrics_array[:, 0].astype(int))
+                    metrics_times.extend(metrics_array[:, 0].astype(float))
                     metrics_total_cells.extend(metrics_array[:, 1].astype(int))
                     metrics_num_genotypes.extend(metrics_array[:, 2].astype(int))
                     metrics_shannon.extend(metrics_array[:, 3].astype(float))
                     metrics_simpson.extend(metrics_array[:, 4].astype(float))
                     metrics_max_mutations.extend(metrics_array[:, 5].astype(int))
+                    metrics_drug_concentration.extend(metrics_array[:, 6].astype(float))
+                    metrics_drug_extra_death_wt.extend(metrics_array[:, 7].astype(float))
 
                 if all_genotypes_all[i]:
                     genotypes_list = all_genotypes_all[i]
@@ -130,15 +138,14 @@ class MonteCarloEngine:
                     genotype_mutations.extend(genotype_mutations_array)
                     genotype_arrays.extend(genotype_arrays_hex)
 
-            # Write batch files
             if lineage_seed_ids:
                 lineage_df = pl.DataFrame(
                     {
                         MetricNames.seed: lineage_seed_ids,
                         MetricNames.time: lineage_times,
-                        MetricNames.births: lineage_births,
-                        MetricNames.deaths: lineage_deaths,
-                        MetricNames.fusions: lineage_fusions,
+                        MetricNames.cell_count: lineage_cell_counts,
+                        MetricNames.genotype_id: lineage_genotype_ids,
+                        MetricNames.ancestor_id: lineage_ancestor_ids,
                     }
                 )
                 lineage_df.write_parquet(
@@ -148,9 +155,9 @@ class MonteCarloEngine:
                     lineage_df,
                     lineage_seed_ids,
                     lineage_times,
-                    lineage_births,
-                    lineage_deaths,
-                    lineage_fusions,
+                    lineage_cell_counts,
+                    lineage_genotype_ids,
+                    lineage_ancestor_ids,
                 )
 
             if metrics_seed_ids:
@@ -163,6 +170,8 @@ class MonteCarloEngine:
                         MetricNames.shannon_index: metrics_shannon,
                         MetricNames.simpson_index: metrics_simpson,
                         MetricNames.max_mutations: metrics_max_mutations,
+                        MetricNames.drug_concentration: metrics_drug_concentration,
+                        MetricNames.drug_extra_death_wt: metrics_drug_extra_death_wt,
                     }
                 )
                 metrics_df.write_parquet(
@@ -177,6 +186,8 @@ class MonteCarloEngine:
                     metrics_shannon,
                     metrics_simpson,
                     metrics_max_mutations,
+                    metrics_drug_concentration,
+                    metrics_drug_extra_death_wt,
                 )
 
             if genotype_seed_ids:
@@ -217,22 +228,6 @@ class MonteCarloEngine:
         save_path: Path,
         batch_size: int = 10000,
     ):
-        """Run Monte Carlo simulations across a parameter sweep grid.
-
-        Parameters
-        ----------
-        parameters : ModelParameters
-            Template parameters (all required fields must be set)
-        seeds : list[int]
-            List of random seeds (same for all parameter combinations)
-        sweep_params : dict[str, np.ndarray]
-            Parameter sweep grid. Keys must match ModelParameters field names,
-            values are 1D arrays of values to sweep through.
-        save_path : Path
-            Directory to save results
-        batch_size : int, optional
-            Number of seeds per batch (default: 10000)
-        """
         save_path = Path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
@@ -250,9 +245,16 @@ class MonteCarloEngine:
         param_values = [sweep_params[name] for name in param_names]
         combinations = list(itertools.product(*param_values))
 
-        # Run each parameter combination
-        for combo_idx, combo_values in enumerate(combinations):
-            # Create a copy of base parameters
+        sweep_metadata = {
+            "param_names": param_names,
+            "param_grids": {name: sweep_params[name].tolist() for name in param_names},
+            "num_combinations": len(combinations),
+            "num_seeds": len(seeds),
+            "total_runs": len(combinations) * len(seeds),
+        }
+
+        results_dirs = []
+        for combo_values in combinations:
             combo_params = _update_model_parameters(
                 parameters, param_names, combo_values
             )
@@ -376,18 +378,21 @@ def _concatenate_batch_files(temp_dir: Path, save_path: Path, num_batches: int) 
 def _run_monte_carlo_simulation(
     Ngenes: int,
     NgenerationsMax: int,
-    DT: int,
+    DT: float,
+    DATA_RESOLUTION: int,
     KC: int,
     pm: float,
     pf: float,
     growthRate: float,
     deathRate: float,
     diversity: int,
-    treatment_every: int,
-    treatment_duration: int,
-    treatment_base_extra: float,
+    initial_population_size: int,
+    treatment_injection_every: int,
+    treatment_initial_concentration: float,
+    treatment_halflife: float,
+    treatment_concentration_to_extra_death: float,
     treatment_selection: float,
-    treatment_cell_density_dependence: float,
+    treatment_resistivity: float,
     seeds: list[int],
 ) -> tuple[list, list, list]:
     """Run Monte Carlo simulations for a list of seeds in parallel."""
@@ -399,17 +404,20 @@ def _run_monte_carlo_simulation(
             Ngenes=Ngenes,
             NgenerationsMax=NgenerationsMax,
             DT=DT,
+            DATA_RESOLUTION=DATA_RESOLUTION,
             KC=KC,
             pm=pm,
             pf=pf,
             growthRate=growthRate,
             deathRate=deathRate,
             diversity=diversity,
-            treatment_every=treatment_every,
-            treatment_duration=treatment_duration,
-            treatment_base_extra=treatment_base_extra,
+            initial_population_size=initial_population_size,
+            treatment_injection_every=treatment_injection_every,
+            treatment_initial_concentration=treatment_initial_concentration,
+            treatment_halflife=treatment_halflife,
+            treatment_concentration_to_extra_death=treatment_concentration_to_extra_death,
             treatment_selection=treatment_selection,
-            treatment_cell_density_dependence=treatment_cell_density_dependence,
+            treatment_resistivity=treatment_resistivity,
         )
 
     # Run simulations in parallel using ThreadPoolExecutor

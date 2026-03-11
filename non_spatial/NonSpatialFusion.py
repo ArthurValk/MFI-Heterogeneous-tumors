@@ -33,26 +33,9 @@ POP_ANCESTOR_ID = 4
 POP_FUSION_COUNT = 5
 POP_GENOTYPE_ID = 6
 
-DATA_RESOLUTION = 25
 
-
-# Functions
 @njit
 def countPopulation(ListePopulation):
-    """
-    Count the total number of cells across all genotypes.
-
-    Parameters
-    ----------
-    ListePopulation : np.ndarray
-        Structured array containing population data with 'count' field
-        representing the number of cells for each genotype
-
-    Returns
-    -------
-    int
-        Total number of cells summed across all genotypes
-    """
     countPop = 0
     for i in range(0, len(ListePopulation)):
         countPop = countPop + ListePopulation[i][POP_COUNT]
@@ -61,19 +44,6 @@ def countPopulation(ListePopulation):
 
 @njit
 def countSpecies(ListePopulation):
-    """
-    Count the number of distinct genotypes with at least one cell.
-
-    Parameters
-    ----------
-    ListePopulation : np.ndarray
-        Structured array containing population data
-
-    Returns
-    -------
-    int
-        Number of genotypes with count > 0
-    """
     countS = 0
     for i in range(0, len(ListePopulation)):
         if ListePopulation[i][POP_COUNT] > 0:
@@ -83,24 +53,13 @@ def countSpecies(ListePopulation):
 
 @njit
 def ComputeShanon(ListePopulation):
-    """
-    Compute the Shannon diversity index for the population.
-
-    Parameters
-    ----------
-    ListePopulation : np.ndarray
-        Structured array containing population data with 'count' field
-
-    Returns
-    -------
-    float
-        Shannon entropy index: -sum(p_i * log(p_i)) where p_i is the
-        proportion of cells with genotype i
-    """
-    res = 0
+    res = 0.0
     Tot = 0
     for i in range(0, len(ListePopulation)):
         Tot = Tot + ListePopulation[i][POP_COUNT]
+
+    if Tot == 0:
+        return 0.0
 
     for i in range(0, len(ListePopulation)):
         if ListePopulation[i][POP_COUNT] > 0:
@@ -112,23 +71,7 @@ def ComputeShanon(ListePopulation):
 
 @njit
 def ComputeIndex(ListePopulation, q):
-    """
-    Compute the generalized Renyi diversity index of order q.
-
-    Parameters
-    ----------
-    ListePopulation : np.ndarray
-        Structured array containing population data with 'count' field
-    q : int
-        Order of the diversity index. q=1 computes Shannon entropy,
-        q=2 computes Simpson index
-
-    Returns
-    -------
-    float
-        Renyi diversity index of order q
-    """
-    res = 0
+    res = 0.0
     if q == 1:
         res = ComputeShanon(ListePopulation)
     else:
@@ -136,9 +79,14 @@ def ComputeIndex(ListePopulation, q):
         for i in range(0, len(ListePopulation)):
             Tot = Tot + ListePopulation[i][POP_COUNT]
 
+        if Tot == 0:
+            return 0.0
+
         for i in range(0, len(ListePopulation)):
             prop = float(ListePopulation[i][POP_COUNT]) / Tot
             res = res + prop**q
+        if res <= 0.0:
+            return 0.0
         res = res ** (float(1) / (1 - q))
 
     return res
@@ -160,21 +108,6 @@ def Mutation(x):
 
 @njit
 def TargetedMutation(x, j):
-    """
-    Generate a genotype with a mutation at a specific locus.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Binary genotype array
-    j : int
-        Locus index to mutate (set to 1)
-
-    Returns
-    -------
-    np.ndarray
-        Genotype with mutation at locus j. Used for initializing diverse starting populations.
-    """
     res = x.copy()
     if j < len(res):
         res[j] = 1
@@ -182,18 +115,38 @@ def TargetedMutation(x, j):
 
 
 @njit
-def make_resistivity(Ngenes: int, selection: float, base_extra: float):
+def is_injection_time(l: int, every: int) -> bool:
+    if every <= 0:
+        return False
+    return l > 0 and l % every == 0
+
+
+@njit
+def compute_decay_factor(dt_hours: float, halflife_hours: float) -> float:
     """
-    Returns resistivity array of length Ngenes.
+    Exponential decay factor over one time step:
+        c(t + dt) = c(t) * exp(-ln(2) * dt / halflife)
+    """
+    if halflife_hours <= 0.0:
+        return 0.0
+    return np.exp(-np.log(2.0) * dt_hours / halflife_hours)
+
+
+@njit
+def make_resistivity(Ngenes: int, selection: float, treatment_resistivity: float):
+    """
+    Returns a dimensionless resistivity array of length Ngenes.
+
     Exactly k genes (k = round(selection*Ngenes), at least 1 if selection>0)
-    get positive weights that sum to base_extra. Others are 0.
+    get coefficients drawn uniformly from [0, treatment_resistivity].
+    Others are 0.
     """
     resist = np.zeros(Ngenes, dtype=np.float64)
 
-    if selection <= 0.0 or base_extra <= 0.0:
+    if selection <= 0.0 or treatment_resistivity <= 0.0:
         return resist
 
-    k = int(selection * Ngenes + 0.5)  # round
+    k = int(selection * Ngenes + 0.5)
     if k < 1:
         k = 1
     if k > Ngenes:
@@ -203,39 +156,37 @@ def make_resistivity(Ngenes: int, selection: float, base_extra: float):
     np.random.shuffle(idx)
     chosen = idx[:k]
 
-    w = np.random.random(k)  # U(0,1)
-
-    # find max
-    wmax = 0.0
     for i in range(k):
-        if w[i] > wmax:
-            wmax = w[i]
-
-    if wmax <= 0.0:
-        # fallback (extremely unlikely)
-        per = base_extra
-        for i in range(k):
-            resist[chosen[i]] = per
-        return resist
-
-    # scale so that max == base_extra
-    scale = base_extra / wmax
-    for i in range(k):
-        resist[chosen[i]] = w[i] * scale
+        resist[chosen[i]] = np.random.random() * treatment_resistivity
 
     return resist
 
 
 @njit
-def genotype_extra_death(genotype, resistivity, base_extra: float) -> float:
+def genotype_resistance_score(genotype, resistivity) -> float:
     """
-    extra = max(0, base_extra - sum(resistivity[i] for i where genotype[i] is True))
+    Precompute the total dimensionless resistance score for a genotype:
+        score = sum(resistivity[i] for mutated loci)
     """
     s = 0.0
     for i in range(len(genotype)):
         if genotype[i]:
             s += resistivity[i]
-    extra = base_extra - s
+    return s
+
+
+@njit
+def genotype_extra_death_from_score(
+    resistance_score: float, current_extra_death: float
+) -> float:
+    """
+    Compute genotype-specific treatment extra death from a precomputed
+    resistance score and the current WT treatment pressure.
+    """
+    if current_extra_death <= 0.0:
+        return 0.0
+
+    extra = current_extra_death * (1.0 - resistance_score)
     if extra < 0.0:
         extra = 0.0
     return extra
@@ -243,21 +194,6 @@ def genotype_extra_death(genotype, resistivity, base_extra: float) -> float:
 
 @njit
 def chooseElement(ListePopulation, total_pop):
-    """
-    Randomly select a genotype index weighted by cell count.
-
-    Parameters
-    ----------
-    ListePopulation : np.ndarray
-        Structured array containing population data with 'count' field
-    total_pop : int
-        Total number of cells in the population
-
-    Returns
-    -------
-    int
-        Index of selected genotype, chosen proportionally to its population size
-    """
     res = 0
 
     if total_pop == 1:
@@ -281,25 +217,8 @@ def chooseElement(ListePopulation, total_pop):
 
 @njit
 def cleanData(ListePopulation):
-    """
-    Filter population list to keep only genotypes with living cells.
-
-    Parameters
-    ----------
-    ListePopulation : list
-        List of population entries (as lists with integer indices)
-
-    Returns
-    -------
-    list
-        Filtered list containing only genotypes with count > 0.
-        The cells_to_mutate and fusion_count fields are reset to 0
-        for all remaining entries
-    """
-    # Filter and reset
     result = List()
 
-    # Seed element type: int64 array len 7
     seed = np.zeros(7, dtype=np.int64)
     result.append(seed)
     result.pop()
@@ -317,34 +236,10 @@ def cleanData(ListePopulation):
 
 @njit
 def fusionVect(G1, G2):
-    """
-    Perform genetic recombination between two fused genotypes.
-
-    Models the parasexual cycle: fusion creates a polyploid cell that then undergoes
-    ploidy reduction, producing two distinct haploid offspring with segregation of
-    parental genetic material.
-
-    Parameters
-    ----------
-    G1 : np.ndarray
-        First parent genotype
-    G2 : np.ndarray
-        Second parent genotype
-
-    Returns
-    -------
-    tuple of np.ndarray
-        Two hybrid offspring genotypes resulting from fusion recombination.
-        At each locus, offspring complementarily inherit from parents: one gets the allele
-        from G1 while the other gets from G2, representing proper genetic segregation
-        during ploidy reduction.
-    """
     hybrid1 = np.zeros(len(G1), dtype=np.bool_)
     hybrid2 = np.zeros(len(G1), dtype=np.bool_)
 
     for i in range(0, len(G1)):
-        # Randomly decide which offspring gets which parent's allele
-        # Ensures proper segregation: one offspring gets G1[i], other gets G2[i]
         y = np.random.randint(0, 2)
         if y == 0:
             hybrid1[i] = G1[i]
@@ -358,21 +253,6 @@ def fusionVect(G1, G2):
 
 @njit
 def MaxScore(ListePopulation, all_genotypes):
-    """
-    Find the maximum number of mutations across all genotypes.
-
-    Parameters
-    ----------
-    ListePopulation : list
-        List of population entries (with genotype indices at POP_GENOTYPE)
-    all_genotypes : list
-        List of all genotype arrays
-
-    Returns
-    -------
-    int
-        Maximum number of mutations (score) among all genotypes
-    """
     res = 0
     for i in range(0, len(ListePopulation)):
         genotype_idx = ListePopulation[i][POP_GENOTYPE]
@@ -382,18 +262,6 @@ def MaxScore(ListePopulation, all_genotypes):
 
 
 def _write_csv_file(filepath: Path, header: list[str], data: list[list]) -> None:
-    """
-    Write data to a CSV file.
-
-    Parameters
-    ----------
-    filepath : Path
-        Path to the output CSV file
-    header : list[str]
-        Header row with column names
-    data : list[list]
-        List of data rows, where each row is a list of values
-    """
     with open(filepath, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
@@ -401,35 +269,10 @@ def _write_csv_file(filepath: Path, header: list[str], data: list[list]) -> None
 
 
 def ModelRun(parameters: ModelParameters) -> ModelResult:
-    """
-    Main entry point for running the heterogeneous tumor growth model.
-
-    Parameters
-    ----------
-    parameters : ModelParameters
-        Configuration object containing:
-        - number_of_genes: Number of possible mutations
-        - number_of_generations: Number of time steps to simulate
-        - dt: Time step size (default 1)
-        - seed: Random seed for reproducibility
-        - carrying_capacity: Maximum population size (KC)
-        - mutation_rate_per_gene: Probability of mutation per gene
-        - fusion_rate: Rate of cell fusion events
-        - growth_rate: Birth rate of cells
-        - death_rate: Death rate of cells
-        - save_path: Directory to save output files
-
-    Returns
-    -------
-    ModelResult
-        Object containing paths to the generated CSV files with simulation results:
-        - metrics_path: Path to metrics CSV (time, total_cells, num_genotypes, shannon_index, simpson_index, max_mutations)
-        - lineage_path: Path to lineage CSV (time, cell_count, genotype_id, ancestor_id)
-        - genotype_path: Path to genotypes CSV (genotype_id, locus_0, locus_1, ..., locus_N)
-    """
     Ngenes = parameters.number_of_genes
     NgenerationsMax = parameters.number_of_generations
     DT = parameters.dt
+    DATA_RESOLUTION = parameters.data_resolution
     s = parameters.seed
     KC = parameters.carrying_capacity
     pm = parameters.mutation_rate_per_gene
@@ -437,51 +280,55 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
     growthRate = parameters.growth_rate
     deathRate = parameters.death_rate
     diversity = parameters.diversity if parameters.diversity is not None else 0
-    treatment_every = parameters.treatment_every
-    treatment_duration = parameters.treatment_duration
-    treatment_base_extra = parameters.treatment_base_extra_death
-    treatment_selection = parameters.treatment_selection
-    treatment_cell_density_dependence = parameters.treatment_cell_density_dependence
+    initial_population_size = parameters.initial_population_size
 
-    # Compute directory path from save_path and parameters
+    treatment_injection_every = parameters.treatment_injection_every
+    treatment_initial_concentration = parameters.treatment_initial_concentration
+    treatment_halflife = parameters.treatment_halflife
+    treatment_concentration_to_extra_death = (
+        parameters.treatment_concentration_to_extra_death
+    )
+    treatment_selection = parameters.treatment_selection
+    treatment_resistivity = parameters.treatment_resistivity
+
     directory_path = parameters.save_path / f"g{growthRate}" / f"mu{pm}" / f"pf{pf}"
 
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
 
-    if s:
+    if s is not None:
         np.random.seed(int(s))
 
     lineage_data, metrics_data, all_genotypes = _ModelRun(
         Ngenes=Ngenes,
         NgenerationsMax=NgenerationsMax,
         DT=DT,
+        DATA_RESOLUTION=DATA_RESOLUTION,
         KC=KC,
         pm=pm,
         pf=pf,
         growthRate=growthRate,
         deathRate=deathRate,
         diversity=diversity,
-        treatment_every=treatment_every if treatment_every is not None else -1,
-        treatment_duration=treatment_duration,
-        treatment_base_extra=treatment_base_extra,
+        initial_population_size=initial_population_size,
+        treatment_injection_every=(
+            treatment_injection_every if treatment_injection_every is not None else -1
+        ),
+        treatment_initial_concentration=treatment_initial_concentration,
+        treatment_halflife=treatment_halflife,
+        treatment_concentration_to_extra_death=treatment_concentration_to_extra_death,
         treatment_selection=treatment_selection,
-        treatment_cell_density_dependence=treatment_cell_density_dependence,
+        treatment_resistivity=treatment_resistivity,
     )
 
-    # ---- STEP 7: Convert Numba typed outputs to plain Python types ----
-    # lineage_data: List[np.ndarray(int64, (4,))] -> list[list[int]]
-    lineage_data_py = [row.tolist() for row in lineage_data]
-
-    # metrics_data: List[np.ndarray(float64, (6,))] -> list[list[float]]
+    # lineage stored internally as float arrays to allow fractional times.
+    # convert back to mixed python rows for CSV writing.
+    lineage_data_py = [
+        [float(row[0]), int(row[1]), int(row[2]), int(row[3])] for row in lineage_data
+    ]
     metrics_data_py = [row.tolist() for row in metrics_data]
-
-    # all_genotypes: List[np.ndarray(bool, (Ngenes,))] -> list[np.ndarray]
-    # (keep as numpy arrays so genotype.tolist() works below)
     all_genotypes_py = [g.copy() for g in all_genotypes]
-    # ---------------------------------------------------------------
 
-    # Write collected data to CSV files
     model_result = ModelResult(
         metrics_path=directory_path / f"Metrics{str(s)}.csv",
         lineage_path=directory_path / f"Lineage{str(s)}.csv",
@@ -497,6 +344,8 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
             MetricNames.shannon_index,
             MetricNames.simpson_index,
             MetricNames.max_mutations,
+            MetricNames.drug_concentration,
+            MetricNames.drug_extra_death_wt,
         ],
         metrics_data_py,
     )
@@ -522,15 +371,6 @@ def ModelRun(parameters: ModelParameters) -> ModelResult:
 
 
 @njit
-def is_treatment_time(l: int, every: int, duration: int) -> bool:
-    if every < 0 or duration <= 0:
-        return False
-    cycle = every + duration
-    phase = l % cycle
-    return phase >= every
-
-
-@njit
 def same_genotype(a, b):
     for i in range(len(a)):
         if a[i] != b[i]:
@@ -538,116 +378,44 @@ def same_genotype(a, b):
     return True
 
 
-# Main Function
 @njit
 def _ModelRun(
     Ngenes: int,
     NgenerationsMax: int,
-    DT: int,
+    DT: float,
+    DATA_RESOLUTION: int,
     KC: int,
     pm: float,
     pf: float,
     growthRate: float,
     deathRate: float,
     diversity: int = 0,
-    treatment_every: int = -1,
-    treatment_duration: int = 0,
-    treatment_base_extra: float = 0.3,
+    initial_population_size: int = 1,
+    treatment_injection_every: int = -1,
+    treatment_initial_concentration: float = 0.25,
+    treatment_halflife: float = 12.0,
+    treatment_concentration_to_extra_death: float = 0.7 / 48.0,
     treatment_selection: float = 0.1,
-    treatment_cell_density_dependence: float = 0.0,
+    treatment_resistivity: float = 1.0,
 ):
-    """
-    Core model simulation for heterogeneous tumor growth with cell fusion.
-
-    Simulates a non-spatial, discrete-time stochastic model of tumor evolution
-    where cells can undergo mutations, divide, die, and fuse. Genotypes are
-    represented as binary arrays of mutations, and population dynamics follow
-    logistic growth with density-dependent death.
-
-    Parameters
-    ----------
-    Ngenes : int
-        Number of possible genes/mutations (determines genotype size)
-    NgenerationsMax : int
-        Number of discrete time steps to simulate
-    DT : int
-        Time step increment (typically 1)
-    KC : int
-        Carrying capacity of the population (determines competition strength)
-    pm : float
-        Mutation rate per gene per cell division event
-    pf : float
-        Fusion rate (probability of cell fusion event)
-    growthRate : float
-        Birth rate parameter (lambda in logistic growth)
-    deathRate : float
-        Death rate parameter (mu in logistic growth)
-    diversity : int | None, optional
-        Number of initial genotypes to seed (default: None, only wildtype)
-        If diversity > 1, starts with wildtype + (diversity-1) genotypes with single mutations
-        at different loci (0, 1, 2, ..., diversity-2)
-    treatment_every : int, optional
-        Treatment cycle off-duration (days between treatment pulses). If < 0, no treatment applied.
-        Treatment is active from day treatment_every to treatment_every + treatment_duration
-    treatment_duration : int, optional
-        Duration of each treatment pulse (days)
-    treatment_base_extra : float, optional
-        Base extra death rate during treatment before density scaling (default: 0.3)
-    treatment_selection : float, optional
-        Fraction of genes that confer resistance (0-1). These genes reduce treatment death
-        when present in the genotype (default: 0.1 for 10%)
-    treatment_cell_density_dependence : float, optional
-        Scaling factor for cell density effects on treatment efficacy (default: 0.0).
-        Higher cell density reduces treatment efficacy as: treat_death = base / (1 + factor * density)
-        Value 0.0 means density-independent treatment; higher values increase density dependence
-
-    Returns
-    -------
-    tuple[list, list, list]
-        lineage_data: List of lists containing lineage information for each time step
-        metrics_data: List of lists containing population metrics for each time step
-        all_genotypes: List of all unique genotype arrays encountered during the simulation
-
-    Notes
-    -----
-    The simulation proceeds through the following phases at each time step:
-
-    1. **Births and Deaths**: For each genotype:
-       - Generate new cells via Poisson process: births ~ Poisson(growthRate * count * DT)
-       - Generate mutants from births via binomial: mutants ~ Binomial(births, Ngenes * pm)
-       - Generate deaths via Poisson: deaths ~ Poisson((base_competition + treatment) * count * DT)
-       - Base competition death: deathRate * (totalPop / KC)
-       - Treatment death (if active): base_extra_death / (1 + cell_density_dependence * totalPop / KC)
-       - Treatment resistance reduces extra death based on genotype mutations at selected loci
-
-    2. **Mutation Processing**: Process mutant cells, creating new genotypes
-
-    3. **Fusion Events**: Randomly select cells for fusion events:
-       - Generate new fusions ~ Poisson(pf * totalPop * DT)
-       - For each fusion, recombine genotypes via fusionVect()
-
-    4. **Data Collection**: Record lineage, population statistics, and diversity indices
-    """
-
     Genotype = np.zeros(Ngenes, dtype=np.bool_)
 
-    Number = np.zeros(NgenerationsMax)  # Number of genotypes per time step
-    Shanon = np.zeros(NgenerationsMax)  # Shanon index per time step
-    Simpson = np.zeros(NgenerationsMax)  # Simpson index per time step
-    Score = np.zeros(NgenerationsMax)  # Maximal amount of mutations per time step
-    TotalCells = np.zeros(NgenerationsMax)  # Total number of cells per time step
+    Number = np.zeros(NgenerationsMax)
+    Shanon = np.zeros(NgenerationsMax)
+    Simpson = np.zeros(NgenerationsMax)
+    Score = np.zeros(NgenerationsMax)
+    TotalCells = np.zeros(NgenerationsMax)
 
-    # Initialize population arrays and genotype storage
-    all_genotypes = List()  # list of bool arrays (genotypes)
-    extra_death_by_genotype = List()  # list of float64
-    ListePop = List()  # list of int64 arrays (len=7)
-    ListeExtincted = List()  # list of int64 arrays (len=7)
+    all_genotypes = List()
+    genotype_resistance_scores = List()
+    ListePop = List()
+    ListeExtincted = List()
 
-    lineage_data = List()  # list of int64 arrays (len=4)
-    metrics_data = List()  # list of float64 arrays (len=6)
+    # lineage data must allow fractional time, so store float64 rows
+    lineage_data = List()
+    metrics_data = List()
     genotypesCounts = 0
 
-    # --- Seed element types for Numba ---
     seed_pop = np.zeros(7, dtype=np.int64)
     ListePop.append(seed_pop)
     ListePop.pop()
@@ -656,11 +424,11 @@ def _ModelRun(
     ListeExtincted.append(seed_ext)
     ListeExtincted.pop()
 
-    seed_line = np.zeros(4, dtype=np.int64)
+    seed_line = np.zeros(4, dtype=np.float64)
     lineage_data.append(seed_line)
     lineage_data.pop()
 
-    seed_met = np.zeros(6, dtype=np.float64)
+    seed_met = np.zeros(8, dtype=np.float64)
     metrics_data.append(seed_met)
     metrics_data.pop()
 
@@ -668,81 +436,89 @@ def _ModelRun(
     all_genotypes.append(seed_gen)
     all_genotypes.pop()
 
-    extra_death_by_genotype.append(0.0)
-    extra_death_by_genotype.pop()
-    # --- end seeding ---
+    genotype_resistance_scores.append(0.0)
+    genotype_resistance_scores.pop()
 
-    # Build treatment resistivity map first (Numba needs this defined before use)
-    resistivity = make_resistivity(Ngenes, treatment_selection, treatment_base_extra)
+    resistivity = make_resistivity(Ngenes, treatment_selection, treatment_resistivity)
+    decay_factor = compute_decay_factor(DT, treatment_halflife)
+    current_concentration = 0.0
 
-    # Add initial genotype (wildtype: no mutations -> maximal treatment sensitivity)
     all_genotypes.append(Genotype.copy())
-    extra_death_by_genotype.append(
-        genotype_extra_death(Genotype, resistivity, treatment_base_extra)
+    genotype_resistance_scores.append(
+        genotype_resistance_score(Genotype, resistivity)
     )
 
     initial_entry = np.array(
-        [1, 0, 0, 0, genotypesCounts, 0, genotypesCounts], dtype=np.int64
+        [initial_population_size, 0, 0, 0, genotypesCounts, 0, genotypesCounts], dtype=np.int64
     )
     ListePop.append(initial_entry)
 
-    # Add initial diverse genotypes if specified
     if diversity > 1:
         for i in range(1, diversity):
             genotypesCounts += 1
             mutant_genotype = TargetedMutation(Genotype, (i - 1) % Ngenes)
             all_genotypes.append(mutant_genotype)
-            extra_death_by_genotype.append(
-                genotype_extra_death(mutant_genotype, resistivity, treatment_base_extra)
+            genotype_resistance_scores.append(
+                genotype_resistance_score(mutant_genotype, resistivity)
             )
             diverse_entry = np.array(
                 [1, len(all_genotypes) - 1, 0, 0, 0, 0, genotypesCounts], dtype=np.int64
             )
             ListePop.append(diverse_entry)
 
-    # Time loop
     for l in range(0, NgenerationsMax):
-        print("Generation=", l)
+        current_time = l * DT
         TotalPopulation = countPopulation(ListePop)
 
-        treat_on = is_treatment_time(l, treatment_every, treatment_duration)
+        if is_injection_time(l, treatment_injection_every):
+            current_concentration += treatment_initial_concentration
 
-        if l % 50 == 0:
+        current_extra_death_wt = (
+            current_concentration * treatment_concentration_to_extra_death
+        )
+
+        if l % 200 == 0:
             print(
-                "t =", l, "treat_on =", treat_on, "TotalPopulation =", TotalPopulation
+                "step =",
+                l,
+                "time_h =",
+                current_time,
+                "conc =",
+                current_concentration,
+                "extra_wt =",
+                current_extra_death_wt,
+                "TotalPopulation =",
+                TotalPopulation,
             )
 
-        # Population loop
         for j in range(0, len(ListePop)):
             nombreRepresentants = ListePop[j][POP_COUNT]
             if nombreRepresentants > 0:
-                newCells = np.random.poisson(
-                    growthRate * nombreRepresentants * DT
-                )  # Newborns
-                newM = np.random.binomial(newCells, Ngenes * pm)  # New mutants
-                if newM > newCells:
-                    newM = newCells
+                newCells = np.random.poisson(growthRate * nombreRepresentants * DT)
 
-                # For each genotype j:
+                # mutation remains per birth event; do NOT rescale pm with dt
+                p_mut = Ngenes * pm
+                if p_mut < 0.0:
+                    p_mut = 0.0
+                if p_mut > 1.0:
+                    p_mut = 1.0
+                newM = np.random.binomial(newCells, p_mut)
+
                 genotype_idx = ListePop[j][POP_GENOTYPE]
 
-                # --- competition death (density-dependent) ---
                 base_term = deathRate * (TotalPopulation / KC)
 
-                # --- treatment death (with cell density dependence) ---
                 treat_term = 0.0
-                if treat_on:
-                    base_treat = extra_death_by_genotype[genotype_idx]
-                    # Scale with cell density: treat_death = base / (1 + scaling * density)
-                    # Higher density reduces treatment efficacy
-                    treat_term = base_treat / (
-                        1.0 + treatment_cell_density_dependence * (TotalPopulation / KC)
+                if current_extra_death_wt > 0.0:
+                    resistance_score = genotype_resistance_scores[genotype_idx]
+                    treat_term = genotype_extra_death_from_score(
+                        resistance_score,
+                        current_extra_death_wt,
                     )
 
-                # total per-cell death hazard this step
                 hazard = (base_term + treat_term) * DT
                 if hazard < 0.0:
-                    hazard = 0.0  # just in case
+                    hazard = 0.0
 
                 newD = np.random.poisson(hazard * nombreRepresentants)
 
@@ -781,7 +557,7 @@ def _ModelRun(
                             1,
                             ListePop[j][POP_GENOTYPE],
                             ListePop[j][POP_CELLS_TO_MUTATE],
-                            l * DT,
+                            int(current_time),
                             ListePop[j][POP_ANCESTOR_ID],
                             ListePop[j][POP_FUSION_COUNT],
                             ListePop[j][POP_GENOTYPE_ID],
@@ -793,7 +569,7 @@ def _ModelRun(
         j = 0
         Ncurrent = len(ListePop)
         while j < Ncurrent:
-            for k in range(0, ListePop[j][POP_CELLS_TO_MUTATE]):
+            for _ in range(0, ListePop[j][POP_CELLS_TO_MUTATE]):
                 parent_genotype = all_genotypes[ListePop[j][POP_GENOTYPE]]
                 GenotypeTemporaire = Mutation(parent_genotype)
                 exist = 0
@@ -808,17 +584,15 @@ def _ModelRun(
                 if exist == 0:
                     genotypesCounts = genotypesCounts + 1
                     all_genotypes.append(GenotypeTemporaire)
-                    extra_death_by_genotype.append(
-                        genotype_extra_death(
-                            GenotypeTemporaire, resistivity, treatment_base_extra
-                        )
+                    genotype_resistance_scores.append(
+                        genotype_resistance_score(GenotypeTemporaire, resistivity)
                     )
                     new_genotype_entry = np.array(
                         [
                             1,
                             len(all_genotypes) - 1,
                             0,
-                            l * DT,
+                            int(current_time),
                             ListePop[j][POP_GENOTYPE_ID],
                             0,
                             genotypesCounts,
@@ -829,12 +603,13 @@ def _ModelRun(
             ListePop[j][POP_CELLS_TO_MUTATE] = 0
             j = j + 1
 
-        # Hybrids formation
         TotalPopulation = countPopulation(ListePop)
-        newH = np.random.poisson(pf * TotalPopulation * DT)  # New hybrids
+
+        # fusion rate is per unit time, so it should be rescaled when dt changes
+        newH = np.random.poisson(pf * TotalPopulation * DT)
         newH = int(np.minimum(newH, int(TotalPopulation / 2)))
 
-        for j in range(0, newH):
+        for _ in range(0, newH):
             y = np.random.randint(1, TotalPopulation + 1)
             countPop2 = 0
             count = 0
@@ -855,7 +630,7 @@ def _ModelRun(
                                 1,
                                 ListePop[count][POP_GENOTYPE],
                                 ListePop[count][POP_CELLS_TO_MUTATE],
-                                l * DT,
+                                int(current_time),
                                 ListePop[count][POP_ANCESTOR_ID],
                                 ListePop[count][POP_FUSION_COUNT],
                                 ListePop[count][POP_GENOTYPE_ID],
@@ -870,24 +645,22 @@ def _ModelRun(
 
         if TotalPopulation > 0:
             for j in range(0, Ncurrent):
-                for k in range(0, ListePop[j][POP_FUSION_COUNT]):
+                for _ in range(0, ListePop[j][POP_FUSION_COUNT]):
                     Genotype1 = all_genotypes[ListePop[j][POP_GENOTYPE]]
 
                     neighbor = chooseElement(ListePop, TotalPopulation)
 
-                    # Decrement both initiator and neighbor (both consumed in fusion)
                     ListePop[j][POP_COUNT] = ListePop[j][POP_COUNT] - 1
                     ListePop[neighbor][POP_COUNT] = ListePop[neighbor][POP_COUNT] - 1
                     TotalPopulation = TotalPopulation - 2
 
-                    # Track extinction of initiator if count reaches zero
                     if ListePop[j][POP_COUNT] == 0:
                         extinct_entry = np.array(
                             [
                                 1,
                                 ListePop[j][POP_GENOTYPE],
                                 ListePop[j][POP_CELLS_TO_MUTATE],
-                                l * DT,
+                                int(current_time),
                                 ListePop[j][POP_ANCESTOR_ID],
                                 ListePop[j][POP_FUSION_COUNT],
                                 ListePop[j][POP_GENOTYPE_ID],
@@ -902,7 +675,7 @@ def _ModelRun(
                                 1,
                                 ListePop[neighbor][POP_GENOTYPE],
                                 ListePop[neighbor][POP_CELLS_TO_MUTATE],
-                                l * DT,
+                                int(current_time),
                                 ListePop[neighbor][POP_ANCESTOR_ID],
                                 ListePop[neighbor][POP_FUSION_COUNT],
                                 ListePop[neighbor][POP_GENOTYPE_ID],
@@ -913,10 +686,8 @@ def _ModelRun(
 
                     Genotype2 = all_genotypes[ListePop[neighbor][POP_GENOTYPE]]
 
-                    # Two offspring from fusion with recombination (parasexual cycle)
                     hybrid1, hybrid2 = fusionVect(Genotype1, Genotype2)
 
-                    # Add first hybrid
                     exist = 0
                     count = 0
                     while count < len(ListePop) and exist == 0:
@@ -929,17 +700,15 @@ def _ModelRun(
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
                         all_genotypes.append(hybrid1)
-                        extra_death_by_genotype.append(
-                            genotype_extra_death(
-                                hybrid1, resistivity, treatment_base_extra
-                            )
+                        genotype_resistance_scores.append(
+                            genotype_resistance_score(hybrid1, resistivity)
                         )
                         hybrid_entry = np.array(
                             [
                                 1,
                                 len(all_genotypes) - 1,
                                 0,
-                                l * DT,
+                                int(current_time),
                                 ListePop[j][POP_GENOTYPE_ID],
                                 0,
                                 genotypesCounts,
@@ -948,7 +717,6 @@ def _ModelRun(
                         )
                         ListePop.append(hybrid_entry)
 
-                    # Add second hybrid
                     exist = 0
                     count = 0
                     while count < len(ListePop) and exist == 0:
@@ -961,17 +729,15 @@ def _ModelRun(
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
                         all_genotypes.append(hybrid2)
-                        extra_death_by_genotype.append(
-                            genotype_extra_death(
-                                hybrid2, resistivity, treatment_base_extra
-                            )
+                        genotype_resistance_scores.append(
+                            genotype_resistance_score(hybrid2, resistivity)
                         )
                         hybrid_entry = np.array(
                             [
                                 1,
                                 len(all_genotypes) - 1,
                                 0,
-                                l * DT,
+                                int(current_time),
                                 ListePop[j][POP_GENOTYPE_ID],
                                 0,
                                 genotypesCounts,
@@ -980,84 +746,95 @@ def _ModelRun(
                         )
                         ListePop.append(hybrid_entry)
 
-                    # Net population change: -2 (both parents) +2 (two hybrids) = 0 per fusion
                     TotalPopulation = TotalPopulation + 2
 
                 ListePop[j][POP_FUSION_COUNT] = 0
 
         else:
             for j in range(0, Ncurrent):
-                for k in range(0, ListePop[j][POP_FUSION_COUNT]):
+                for _ in range(0, ListePop[j][POP_FUSION_COUNT]):
                     ListePop[j][POP_COUNT] = ListePop[j][POP_COUNT] + 1
 
         ListePop = cleanData(ListePop)
 
-        # Collecting results for output files
         if l % DATA_RESOLUTION == 0 or l == NgenerationsMax - 1:
             Number[l] = countSpecies(ListePop)
             TotalCells[l] = countPopulation(ListePop)
             Shanon[l] = ComputeShanon(ListePop)
             Simpson[l] = ComputeIndex(ListePop, 2)
             Score[l] = MaxScore(ListePop, all_genotypes)
+
             for i in range(0, len(ListeExtincted)):
                 row = np.array(
                     [
-                        l * DT,
-                        1,
-                        ListeExtincted[i][POP_GENOTYPE_ID],
-                        ListeExtincted[i][POP_ANCESTOR_ID],
+                        current_time,
+                        1.0,
+                        float(ListeExtincted[i][POP_GENOTYPE_ID]),
+                        float(ListeExtincted[i][POP_ANCESTOR_ID]),
                     ],
-                    dtype=np.int64,
+                    dtype=np.float64,
                 )
                 lineage_data.append(row)
 
             for i in range(0, len(ListePop)):
                 row = np.array(
                     [
-                        l * DT,
-                        ListePop[i][POP_COUNT],
-                        ListePop[i][POP_GENOTYPE_ID],
-                        ListePop[i][POP_ANCESTOR_ID],
+                        current_time,
+                        float(ListePop[i][POP_COUNT]),
+                        float(ListePop[i][POP_GENOTYPE_ID]),
+                        float(ListePop[i][POP_ANCESTOR_ID]),
                     ],
-                    dtype=np.int64,
+                    dtype=np.float64,
                 )
                 lineage_data.append(row)
 
             row = np.array(
                 [
-                    float(l * DT),
+                    float(current_time),
                     float(TotalCells[l]),
                     float(Number[l]),
                     float(Shanon[l]),
                     float(Simpson[l]),
                     float(Score[l]),
+                    float(current_concentration),
+                    float(current_extra_death_wt),
                 ],
                 dtype=np.float64,
             )
             metrics_data.append(row)
 
             while len(ListeExtincted) > 0:
-                ListeExtincted.pop()  # Clear while preserving type
+                ListeExtincted.pop()
 
-    # Return all collected data for file writing (as tuple for Numba compatibility)
+        current_concentration *= decay_factor
+
     return lineage_data, metrics_data, all_genotypes
 
 
 if __name__ == "__main__":
     start = time.time()
 
-    # Parse command-line arguments or use defaults
+    # With dt = 0.25 hours (15 min), rates that were previously specified per 12h
+    # should usually be divided by 48, EXCEPT mutation_rate_per_gene which is per birth.
     params = ModelParameters(
         seed=int(sys.argv[1]),
         number_of_genes=int(sys.argv[2]),
         carrying_capacity=int(sys.argv[3]),
         number_of_generations=int(sys.argv[4]),
-        mutation_rate_per_gene=float(sys.argv[5]),
-        fusion_rate=float(sys.argv[6]),
+        mutation_rate_per_gene=float(sys.argv[5]),  # per birth event; not rescaled by dt
+        fusion_rate=float(sys.argv[6]),  # per hour-scale unit used in the simulator
         growth_rate=float(sys.argv[7]),
         death_rate=float(sys.argv[8]),
         save_path=Path("Results") / f"CC{int(sys.argv[3])}" / "Neutral/LogisticFusion",
         diversity=int(sys.argv[9]),
+        dt=0.25,
+        data_resolution=4,
+        treatment_injection_every=21 * 24 * 4,
+        treatment_initial_concentration=0.25,
+        treatment_halflife=12.0,
+        treatment_concentration_to_extra_death=0.7 / 48.0,
+        treatment_selection=0.1,
+        treatment_resistivity=1.0,
     )
 
     ModelRun(parameters=params)

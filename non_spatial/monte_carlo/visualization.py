@@ -167,9 +167,9 @@ class MCVisualization:
     @staticmethod
     def plot_metric_distributions_at_time(
         metrics_df: pl.DataFrame,
-        time: int,
+        time: int | float,
         metrics_to_plot: Optional[list[tuple[str, Literal["integer", "float"]]]] = None,
-        figsize: tuple = (14, 10),
+        figsize: tuple = (14, 12),
     ) -> matplotlib.figure.Figure:
         """Plot distributions of multiple metrics at a single timepoint.
 
@@ -196,6 +196,8 @@ class MCVisualization:
                 (MetricNames.max_mutations, "integer"),
                 (MetricNames.shannon_index, "float"),
                 (MetricNames.simpson_index, "float"),
+                (MetricNames.drug_concentration, "float"),
+                (MetricNames.drug_extra_death_wt, "float"),
             ]
 
         # Filter to timepoint
@@ -310,7 +312,6 @@ class MCVisualization:
                 label=f"Exp {idx + 1}: {percentile:.0f}th-{100.0 - percentile:.0f}th percentile",
             )
 
-            # Plot mean line
             ax.plot(
                 times,
                 values_mean,
@@ -320,7 +321,7 @@ class MCVisualization:
                 zorder=10,
             )
 
-        ax.set_xlabel("Time", fontsize=11)
+        ax.set_xlabel("Time (hours)", fontsize=11)
         ax.set_ylabel(metric, fontsize=11)
         ax.set_title(f"{metric} over Time", fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.3)
