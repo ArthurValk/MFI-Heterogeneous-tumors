@@ -466,9 +466,7 @@ def _load_results_lazily(
     save_path: Path,
 ) -> pl.LazyFrame:
     """Loading results lazily from parquet files for efficient filtering and analysis."""
-    return pl.scan_parquet(
-        save_path / "**" / getattr(OutputFiles, data_source) / "*.parquet"
-    )
+    return pl.scan_parquet(save_path / "**" / getattr(OutputFiles, data_source))
 
 
 def _load_metadata(save_path: Path, file_name: str = SWEEP_METADATA_FILE) -> dict:
