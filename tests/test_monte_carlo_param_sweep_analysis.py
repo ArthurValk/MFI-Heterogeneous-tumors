@@ -335,12 +335,12 @@ def _(
 ):
     # Filter lazy_metrics by selected parameter combinations
     _selected_combos = combo_multiselect.value if combo_multiselect.value else []
+    _dfs = []
 
     if not _selected_combos:
         _fig = None
     else:
-        # Build filter condition: OR across selected combos, AND within params
-        _cond = None
+        # Collect data for each combo separately to plot as separate lines
         for _combo_label in _selected_combos:
             _param_dict = combo_to_params[_combo_label]
             _combo_cond = None
@@ -349,16 +349,11 @@ def _(
                 _combo_cond = (
                     _param_cond if _combo_cond is None else _combo_cond & _param_cond
                 )
-            _cond = _combo_cond if _cond is None else _cond | _combo_cond
+            _combo_data = lazy_metrics.filter(_combo_cond).collect()
+            if len(_combo_data) > 0:
+                _dfs.append(_combo_data)
 
-        # Collect only the filtered data for visualization
-        _filtered_data = lazy_metrics.filter(_cond).collect()
-
-        if (
-            len(_filtered_data) > 0
-            and MetricNames.total_cells in _filtered_data.columns
-        ):
-            _dfs = [_filtered_data]
+        if _dfs and MetricNames.total_cells in _dfs[0].columns:
             _metrics_to_plot = [
                 MetricNames.total_cells,
                 MetricNames.num_genotypes,
@@ -418,24 +413,18 @@ def _(mo, time_slider):
 
 
 @app.cell
-def _(mo):
-    mo.md("""
-    ## Final State Distributions
-    """)
-    return
-
-
-@app.cell
 def _(
     MCVisualization,
     MetricNames,
     combo_multiselect,
     combo_to_params,
     lazy_metrics,
+    mo,
     pl,
     time_slider,
 ):
     _selected_combos = combo_multiselect.value if combo_multiselect.value else []
+    _figs = []
 
     if _selected_combos and time_slider.value is not None:
         _selected_time = time_slider.value
@@ -446,7 +435,7 @@ def _(
             (MetricNames.max_mutations, "integer"),
         ]
 
-        # Show distributions for each parameter combination at selected time
+        # Collect distributions for each parameter combination at selected time
         for _combo_label in sorted(_selected_combos):
             _param_dict = combo_to_params[_combo_label]
             # Build filter for this combo
@@ -465,8 +454,10 @@ def _(
                     metrics_to_plot=_metrics_to_plot,
                     figsize=(12, 8),
                 )
+                _figs.append(_fig)
 
-    _fig
+    # Display all figures stacked vertically
+    mo.vstack(_figs) if _figs else None
     return
 
 
