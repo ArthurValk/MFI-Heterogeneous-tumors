@@ -47,13 +47,13 @@ ModelParametersTyping = Literal[
     "fusion_rate",
     "growth_rate",
     "death_rate",
-    "dt",
     "diversity",
-    "treatment_every",
-    "treatment_duration",
-    "treatment_base_extra_death",
+    "treatment_injection_every",
+    "treatment_initial_concentration",
+    "treatment_halflife",
+    "treatment_concentration_to_extra_death",
     "treatment_selection",
-    "treatment_cell_density_dependence",
+    "treatment_resistivity",
 ]
 
 

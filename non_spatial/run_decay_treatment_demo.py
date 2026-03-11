@@ -297,7 +297,7 @@ def main():
         MetricNames.shannon_index,
         MetricNames.simpson_index,
     ]:
-        MCVisualization.plot_temporal_trend(metrics_all, metric, seed=None)
+        MCVisualization.plot_temporal_trend(metrics_all, metric)
         plt.tight_layout()
         plt.show()
 

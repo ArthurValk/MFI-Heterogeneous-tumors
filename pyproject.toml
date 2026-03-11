@@ -21,9 +21,3 @@ dev-dependencies = [
     "ty>=0.0.16",
     "pytest>=9.0.2",
 ]
-
-[tool.coverage.run]
-source = ["aida_ts"]
-
-[tool.coverage.report]
-show_missing = true

@@ -33,7 +33,7 @@ def _():
 
 @app.cell
 def _(TEST_OUTPUT_PATH, mo):
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_3"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_4"
     from non_spatial.monte_carlo.monte_carlo import _load_metadata
 
     metadata = _load_metadata(output_dir)
@@ -55,9 +55,6 @@ def _(metadata, mo):
         ]
     )
     return param_ranges, param_sliders
-
-
-# <editor-fold desc="Visualizing with sliders for each param">
 
 
 @app.cell
@@ -129,11 +126,13 @@ def _(MCVisualization, MetricNames, filtered_metrics, plt):
         _metrics_to_viz = [
             MetricNames.total_cells,
             MetricNames.num_genotypes,
-            MetricNames.shannon_index,
             MetricNames.max_mutations,
+            MetricNames.shannon_index,
+            MetricNames.simpson_index,
         ]
 
-        _fig, _axes = plt.subplots(2, 2, figsize=(14, 10))
+        _fig, _axes = plt.subplots(3, 2, figsize=(14, 10))
+        _axes[-1,-1].axis('off')
         _axes = _axes.flatten()
 
         for _idx, _metric in enumerate(_metrics_to_viz):
@@ -210,8 +209,11 @@ def _(MCVisualization, MetricNames, filtered_metrics, time_slider_filtered):
     _metrics_to_plot = [
         (MetricNames.total_cells, "float"),
         (MetricNames.num_genotypes, "integer"),
-        (MetricNames.shannon_index, "float"),
         (MetricNames.max_mutations, "integer"),
+        (MetricNames.shannon_index, "float"),
+        (MetricNames.simpson_index, "float"),
+        (MetricNames.drug_concentration, "float"),
+        (MetricNames.drug_extra_death_wt, "float"),
     ]
     _dist_fig = MCVisualization.plot_metric_distributions_at_time(
         filtered_metrics,
@@ -223,14 +225,11 @@ def _(MCVisualization, MetricNames, filtered_metrics, time_slider_filtered):
     return
 
 
-# </editor-fold>
-
-
 @app.cell
-def _(lazy_metrics, mo, param_ranges):
+def _(param_ranges):
     # Get unique parameter combinations without materializing data
     param_cols = list(sorted(param_ranges.keys()))
-    return (lazy_metrics, param_cols)
+    return (param_cols,)
 
 
 @app.cell
@@ -309,7 +308,7 @@ def _(metadata, mo):
         value=[_combo_labels[0]] if _combo_labels else [],
         label="Select parameter combinations to compare:",
     )
-    return (combo_multiselect, combo_to_params)
+    return combo_multiselect, combo_to_params
 
 
 @app.cell
@@ -363,11 +362,13 @@ def _(
             _metrics_to_plot = [
                 MetricNames.total_cells,
                 MetricNames.num_genotypes,
-                MetricNames.shannon_index,
                 MetricNames.max_mutations,
+                MetricNames.shannon_index,
+                MetricNames.simpson_index,
             ]
 
-            _fig, _axes = plt.subplots(2, 2, figsize=(16, 12))
+            _fig, _axes = plt.subplots(3, 2, figsize=(16, 12))
+            _axes[-1, -1].axis('off')
             _axes = _axes.flatten()
 
             for _idx, _metric in enumerate(_metrics_to_plot):
@@ -437,8 +438,11 @@ def _(
         _metrics_to_plot = [
             (MetricNames.total_cells, "float"),
             (MetricNames.num_genotypes, "integer"),
-            (MetricNames.shannon_index, "float"),
             (MetricNames.max_mutations, "integer"),
+            (MetricNames.shannon_index, "float"),
+            (MetricNames.simpson_index, "float"),
+            (MetricNames.drug_concentration, "float"),
+            (MetricNames.drug_extra_death_wt, "float"),
         ]
 
         # Collect distributions for each parameter combination at selected time
