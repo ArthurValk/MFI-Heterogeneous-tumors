@@ -1,3 +1,4 @@
+import dataclasses
 from pathlib import Path
 import matplotlib.pyplot as plt
 import polars as pl
@@ -186,9 +187,7 @@ def main():
 
     print("Running simulations WITHOUT fusion")
 
-    no_fusion_params = ModelParameters(
-        **{**base_params.__dict__, "fusion_rate": 0.0}
-    )
+    no_fusion_params = dataclasses.replace(base_params, fusion_rate=0.0)
 
     MonteCarloEngine.monte_carlo_simulation(
         parameters=no_fusion_params,
