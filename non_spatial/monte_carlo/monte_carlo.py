@@ -6,6 +6,7 @@ import itertools
 import json
 import gc
 import os
+from typing import Literal
 
 import numpy as np
 import polars as pl
@@ -24,12 +25,27 @@ class MonteCarloEngine:
         save_path: Path,
         batch_size: int = 10000,
     ):
+        """Run Monte Carlo simulations with memory-efficient batch processing.
+
+        Parameters
+        ----------
+        parameters : ModelParameters
+            Model parameters
+        seeds : list[int]
+            List of random seeds to run
+        save_path : Path
+            Directory to save results
+        batch_size : int, optional
+            Number of seeds to process in parallel per batch
+        """
         save_path = Path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
+        # Create temp directory for batch files
         temp_dir = save_path / ".temp_batches"
         temp_dir.mkdir(exist_ok=True)
 
+        # Process seeds in batches
         num_batches = (len(seeds) + batch_size - 1) // batch_size
 
         for batch_idx in range(num_batches):
@@ -66,6 +82,7 @@ class MonteCarloEngine:
                 )
             )
 
+            # Flatten results from this batch (vectorized for speed)
             lineage_seed_ids = []
             lineage_times = []
             lineage_cell_counts = []
@@ -88,6 +105,7 @@ class MonteCarloEngine:
             genotype_arrays = []
 
             for i, seed in enumerate(batch_seeds):
+                # Convert Numba lists to numpy arrays for vectorized access
                 if lineage_data_all[i]:
                     lineage_array = np.array(lineage_data_all[i])
                     lineage_seed_ids.extend([seed] * len(lineage_array))
@@ -106,7 +124,9 @@ class MonteCarloEngine:
                     metrics_simpson.extend(metrics_array[:, 4].astype(float))
                     metrics_max_mutations.extend(metrics_array[:, 5].astype(int))
                     metrics_drug_concentration.extend(metrics_array[:, 6].astype(float))
-                    metrics_drug_extra_death_wt.extend(metrics_array[:, 7].astype(float))
+                    metrics_drug_extra_death_wt.extend(
+                        metrics_array[:, 7].astype(float)
+                    )
 
                 if all_genotypes_all[i]:
                     genotypes_list = all_genotypes_all[i]
@@ -192,10 +212,14 @@ class MonteCarloEngine:
                     genotype_arrays,
                 )
 
+            # Clean up simulation results and trigger garbage collection
             del lineage_data_all, metrics_data_all, all_genotypes_all
             gc.collect()
 
+        # Concatenate all batch files into final outputs
         _concatenate_batch_files(temp_dir, save_path, num_batches)
+
+        # Clean up temp directory
         shutil.rmtree(temp_dir)
 
     @staticmethod
@@ -209,6 +233,7 @@ class MonteCarloEngine:
         save_path = Path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
+        # Validate sweep_params keys against ModelParameters
         field_names = {f.name for f in fields(ModelParameters)}
         invalid_keys = set(sweep_params.keys()) - field_names
         if invalid_keys:
@@ -217,30 +242,24 @@ class MonteCarloEngine:
                 f"Valid options: {sorted(field_names)}"
             )
 
+        # Generate all parameter combinations
         param_names = sorted(sweep_params.keys())
         param_values = [sweep_params[name] for name in param_names]
         combinations = list(itertools.product(*param_values))
 
-        sweep_metadata = {
-            "param_names": param_names,
-            "param_grids": {name: sweep_params[name].tolist() for name in param_names},
-            "num_combinations": len(combinations),
-            "num_seeds": len(seeds),
-            "total_runs": len(combinations) * len(seeds),
-        }
-
-        results_dirs = []
         for combo_values in combinations:
             combo_params = _update_model_parameters(
                 parameters, param_names, combo_values
             )
 
+            # Create output directory for this combination
             combo_dir_name = "_".join(
                 f"{name}={val:.4g}" for name, val in zip(param_names, combo_values)
             )
             combo_dir = save_path / combo_dir_name
             combo_dir.mkdir(parents=True, exist_ok=True)
 
+            # Run simulation for this combination
             MonteCarloEngine.monte_carlo_simulation(
                 parameters=combo_params,
                 seeds=seeds,
@@ -248,22 +267,39 @@ class MonteCarloEngine:
                 batch_size=batch_size,
             )
 
-            results_dirs.append(
-                {
-                    "combination": {
-                        name: float(val) for name, val in zip(param_names, combo_values)
-                    },
-                    "output_dir": str(combo_dir),
-                }
-            )
+            # Add parameter columns to all output parquet files for efficient filtering
+            _add_parameter_columns_to_outputs(combo_dir, param_names, combo_values)
 
+            # Clean up between parameter combinations
             del combo_params, combo_dir
             gc.collect()
 
-        sweep_metadata["results"] = results_dirs
+        # Store metadata about the sweep (machine-independent)
+        sweep_metadata = {
+            "param_grids": {name: sweep_params[name].tolist() for name in param_names},
+            "num_combinations": len(combinations),
+            "num_seeds": len(seeds),
+            "total_runs": len(combinations) * len(seeds),
+        }
+
+        # Save sweep metadata
         metadata_path = save_path / "sweep_metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(sweep_metadata, f, indent=2)
+
+
+class OutputFiles:
+    """Constants for output file names."""
+
+    lineage = "lineage_data.parquet"
+    metrics = "metrics_data.parquet"
+    genotypes = "genotypes_data.parquet"
+
+
+OutputFilesTyping = Literal["lineage", "metrics", "genotypes"]
+
+
+SWEEP_METADATA_FILE = "sweep_metadata.json"
 
 
 def _update_model_parameters(
@@ -271,6 +307,22 @@ def _update_model_parameters(
     param_names: list[str],
     param_values: tuple,
 ) -> ModelParameters:
+    """Create a new ModelParameters with specified fields updated.
+
+    Parameters
+    ----------
+    base_params : ModelParameters
+        Template parameters to update
+    param_names : list[str]
+        Names of fields to update
+    param_values : tuple
+        Values corresponding to param_names
+
+    Returns
+    -------
+    ModelParameters
+        New ModelParameters instance with updates applied
+    """
     params_dict = asdict(base_params)
     for name, value in zip(param_names, param_values):
         params_dict[name] = value
@@ -278,6 +330,8 @@ def _update_model_parameters(
 
 
 def _concatenate_batch_files(temp_dir: Path, save_path: Path, num_batches: int) -> None:
+    """Concatenate all batch parquet files into final output files."""
+    # Concatenate lineage data
     lineage_batches = []
     for i in range(num_batches):
         batch_file = temp_dir / f"lineage_batch_{i}.parquet"
@@ -289,6 +343,7 @@ def _concatenate_batch_files(temp_dir: Path, save_path: Path, num_batches: int) 
         del lineage_df, lineage_batches
         gc.collect()
 
+    # Concatenate metrics data
     metrics_batches = []
     for i in range(num_batches):
         batch_file = temp_dir / f"metrics_batch_{i}.parquet"
@@ -300,6 +355,7 @@ def _concatenate_batch_files(temp_dir: Path, save_path: Path, num_batches: int) 
         del metrics_df, metrics_batches
         gc.collect()
 
+    # Concatenate genotypes data
     genotypes_batches = []
     for i in range(num_batches):
         batch_file = temp_dir / f"genotypes_batch_{i}.parquet"
@@ -332,7 +388,10 @@ def _run_monte_carlo_simulation(
     treatment_resistivity: float,
     seeds: list[int],
 ) -> tuple[list, list, list]:
+    """Run Monte Carlo simulations for a list of seeds in parallel."""
+
     def run_single_seed(seed: int):
+        """Run a single model with the given seed."""
         np.random.seed(int(seed))
         return _ModelRun(
             Ngenes=Ngenes,
@@ -354,12 +413,69 @@ def _run_monte_carlo_simulation(
             treatment_resistivity=treatment_resistivity,
         )
 
+    # Run simulations in parallel using ThreadPoolExecutor
+    # Cap workers at CPU count to avoid thread overhead
     max_workers = min(len(seeds), os.cpu_count() or 4)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(run_single_seed, seeds))
 
+    # Unpack results
     lineage_data_all = [r[0] for r in results]
     metrics_data_all = [r[1] for r in results]
     all_genotypes_all = [r[2] for r in results]
 
     return lineage_data_all, metrics_data_all, all_genotypes_all
+
+
+def _add_parameter_columns_to_outputs(
+    output_dir: Path,
+    param_names: list[str],
+    param_values: tuple,
+) -> None:
+    """Add parameter columns to all output parquet files.
+
+    Parameters
+    ----------
+    output_dir : Path
+        Directory containing metrics_data.parquet, lineage_data.parquet, genotypes_data.parquet
+    param_names : list[str]
+        Names of the parameters being varied
+    param_values : tuple
+        Values of the parameters for this combination
+    """
+    # Files to augment with parameter columns
+    output_files = [
+        OutputFiles.metrics,
+        OutputFiles.lineage,
+        OutputFiles.genotypes,
+    ]
+
+    for filename in output_files:
+        filepath = output_dir / filename
+        if filepath.exists():
+            df = pl.read_parquet(filepath)
+            # Add parameter columns
+            for param_name, param_value in zip(param_names, param_values):
+                df = df.with_columns(pl.lit(param_value).alias(param_name))
+            df.write_parquet(filepath)
+            del df
+            gc.collect()
+
+
+def _load_results_lazily(
+    data_source: OutputFilesTyping,
+    save_path: Path,
+) -> pl.LazyFrame:
+    """Loading results lazily from parquet files for efficient filtering and analysis."""
+    return pl.scan_parquet(save_path / "**" / getattr(OutputFiles, data_source))
+
+
+def _load_metadata(save_path: Path, file_name: str = SWEEP_METADATA_FILE) -> dict:
+    """Load sweep metadata from JSON file."""
+    metadata_file = save_path / file_name
+    if metadata_file.exists():
+        with open(metadata_file) as f:
+            return json.load(f)
+
+    else:
+        raise FileNotFoundError(f"Sweep metadata file not found at {metadata_file}")

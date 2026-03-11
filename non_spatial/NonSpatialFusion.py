@@ -379,6 +379,70 @@ def same_genotype(a, b):
 
 
 @njit
+def record_lineage_entries(
+    lineage_data, current_time, population_list, use_single_count=False
+):
+    """
+    Append lineage entries for each genotype in the population list.
+
+    Parameters
+    ----------
+    lineage_data : List
+        List to append rows to
+    current_time : float
+        Current simulation time
+    population_list : List
+        List of population entries (int64 arrays)
+    use_single_count : bool
+        If True, use count=1.0 for each entry (for extinct populations).
+        If False, use actual count from population_list.
+    """
+    for i in range(0, len(population_list)):
+        count = 1.0 if use_single_count else float(population_list[i][POP_COUNT])
+        row = np.array(
+            [
+                current_time,
+                count,
+                float(population_list[i][POP_GENOTYPE_ID]),
+                float(population_list[i][POP_ANCESTOR_ID]),
+            ],
+            dtype=np.float64,
+        )
+        lineage_data.append(row)
+
+
+@njit
+def record_metrics_row(
+    metrics_data,
+    current_time,
+    total_cells,
+    num_genotypes,
+    shannon,
+    simpson,
+    max_mutations,
+    concentration,
+    extra_death_wt,
+):
+    """
+    Append a metrics row to the metrics data list.
+    """
+    row = np.array(
+        [
+            float(current_time),
+            float(total_cells),
+            float(num_genotypes),
+            float(shannon),
+            float(simpson),
+            float(max_mutations),
+            float(concentration),
+            float(extra_death_wt),
+        ],
+        dtype=np.float64,
+    )
+    metrics_data.append(row)
+
+
+@njit
 def _ModelRun(
     Ngenes: int,
     NgenerationsMax: int,
@@ -444,12 +508,11 @@ def _ModelRun(
     current_concentration = 0.0
 
     all_genotypes.append(Genotype.copy())
-    genotype_resistance_scores.append(
-        genotype_resistance_score(Genotype, resistivity)
-    )
+    genotype_resistance_scores.append(genotype_resistance_score(Genotype, resistivity))
 
     initial_entry = np.array(
-        [initial_population_size, 0, 0, 0, genotypesCounts, 0, genotypesCounts], dtype=np.int64
+        [initial_population_size, 0, 0, 0, genotypesCounts, 0, genotypesCounts],
+        dtype=np.int64,
     )
     ListePop.append(initial_entry)
 
@@ -465,6 +528,27 @@ def _ModelRun(
                 [1, len(all_genotypes) - 1, 0, 0, 0, 0, genotypesCounts], dtype=np.int64
             )
             ListePop.append(diverse_entry)
+
+    # Record initial state (t=0, before any simulation steps)
+    current_time = 0.0
+    Number[0] = countSpecies(ListePop)
+    TotalCells[0] = countPopulation(ListePop)
+    Shanon[0] = ComputeShanon(ListePop)
+    Simpson[0] = ComputeIndex(ListePop, 2)
+    Score[0] = MaxScore(ListePop, all_genotypes)
+
+    record_lineage_entries(lineage_data, current_time, ListePop, use_single_count=False)
+    record_metrics_row(
+        metrics_data,
+        current_time,
+        TotalCells[0],
+        Number[0],
+        Shanon[0],
+        Simpson[0],
+        Score[0],
+        0.0,  # concentration = 0 at t=0
+        0.0,  # treatment pressure = 0 at t=0
+    )
 
     for l in range(0, NgenerationsMax):
         current_time = l * DT
@@ -757,51 +841,30 @@ def _ModelRun(
 
         ListePop = cleanData(ListePop)
 
-        if l % DATA_RESOLUTION == 0 or l == NgenerationsMax - 1:
+        if (l > 0 and l % DATA_RESOLUTION == 0) or l == NgenerationsMax - 1:
             Number[l] = countSpecies(ListePop)
             TotalCells[l] = countPopulation(ListePop)
             Shanon[l] = ComputeShanon(ListePop)
             Simpson[l] = ComputeIndex(ListePop, 2)
             Score[l] = MaxScore(ListePop, all_genotypes)
 
-            for i in range(0, len(ListeExtincted)):
-                row = np.array(
-                    [
-                        current_time,
-                        1.0,
-                        float(ListeExtincted[i][POP_GENOTYPE_ID]),
-                        float(ListeExtincted[i][POP_ANCESTOR_ID]),
-                    ],
-                    dtype=np.float64,
-                )
-                lineage_data.append(row)
-
-            for i in range(0, len(ListePop)):
-                row = np.array(
-                    [
-                        current_time,
-                        float(ListePop[i][POP_COUNT]),
-                        float(ListePop[i][POP_GENOTYPE_ID]),
-                        float(ListePop[i][POP_ANCESTOR_ID]),
-                    ],
-                    dtype=np.float64,
-                )
-                lineage_data.append(row)
-
-            row = np.array(
-                [
-                    float(current_time),
-                    float(TotalCells[l]),
-                    float(Number[l]),
-                    float(Shanon[l]),
-                    float(Simpson[l]),
-                    float(Score[l]),
-                    float(current_concentration),
-                    float(current_extra_death_wt),
-                ],
-                dtype=np.float64,
+            record_lineage_entries(
+                lineage_data, current_time, ListeExtincted, use_single_count=True
             )
-            metrics_data.append(row)
+            record_lineage_entries(
+                lineage_data, current_time, ListePop, use_single_count=False
+            )
+            record_metrics_row(
+                metrics_data,
+                current_time,
+                TotalCells[l],
+                Number[l],
+                Shanon[l],
+                Simpson[l],
+                Score[l],
+                current_concentration,
+                current_extra_death_wt,
+            )
 
             while len(ListeExtincted) > 0:
                 ListeExtincted.pop()
@@ -821,7 +884,9 @@ if __name__ == "__main__":
         number_of_genes=int(sys.argv[2]),
         carrying_capacity=int(sys.argv[3]),
         number_of_generations=int(sys.argv[4]),
-        mutation_rate_per_gene=float(sys.argv[5]),  # per birth event; not rescaled by dt
+        mutation_rate_per_gene=float(
+            sys.argv[5]
+        ),  # per birth event; not rescaled by dt
         fusion_rate=float(sys.argv[6]),  # per hour-scale unit used in the simulator
         growth_rate=float(sys.argv[7]),
         death_rate=float(sys.argv[8]),

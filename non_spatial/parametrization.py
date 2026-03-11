@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass
@@ -36,6 +37,25 @@ class ModelParameters:
     # resistance controls
     treatment_selection: float = 0.1
     treatment_resistivity: float = 1.0
+
+
+ModelParametersTyping = Literal[
+    "number_of_genes",
+    "carrying_capacity",
+    "number_of_generations",
+    "mutation_rate_per_gene",
+    "fusion_rate",
+    "growth_rate",
+    "death_rate",
+    "diversity",
+    "initial_population_size",
+    "treatment_injection_every",
+    "treatment_initial_concentration",
+    "treatment_halflife",
+    "treatment_concentration_to_extra_death",
+    "treatment_selection",
+    "treatment_resistivity",
+]
 
 
 @dataclass(frozen=True)

@@ -85,7 +85,7 @@ def plot_lineage_stack(
     extension : Literal["png", "pdf"], optional
         File extension for the saved plot. Can be either "png" or "pdf".
     top_n : int, optional
-        Only plot the top N genotypes by total cell count. Default is 20.
+        Only plot the top N genotypes by total cell count.
     """
     fig, ax = plt.subplots(figsize=(14, 8))
 
