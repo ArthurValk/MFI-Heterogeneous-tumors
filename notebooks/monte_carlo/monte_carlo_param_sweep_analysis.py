@@ -132,7 +132,7 @@ def _(MCVisualization, MetricNames, filtered_metrics, plt):
         ]
 
         _fig, _axes = plt.subplots(3, 2, figsize=(14, 10))
-        _axes[-1,-1].axis('off')
+        _axes[-1, -1].axis("off")
         _axes = _axes.flatten()
 
         for _idx, _metric in enumerate(_metrics_to_viz):
@@ -368,7 +368,7 @@ def _(
             ]
 
             _fig, _axes = plt.subplots(3, 2, figsize=(16, 12))
-            _axes[-1, -1].axis('off')
+            _axes[-1, -1].axis("off")
             _axes = _axes.flatten()
 
             for _idx, _metric in enumerate(_metrics_to_plot):

@@ -59,7 +59,7 @@ def _(ModelParameters, ModelParametersTyping, TEST_OUTPUT_PATH, marimo):
         death_rate=0.04 / 48.0,  # rescaled from per-12h to per-15min
         save_path=output_dir,
         dt=0.25,  # 15 minutes = 0.25 hours
-        data_resolution=24*4,  # store every day to prevent file size from exploding
+        data_resolution=24 * 4,  # store every day to prevent file size from exploding
         diversity=1,
         seed=0,
         treatment_injection_every=21 * 24 * 4,  # every 3 weeks

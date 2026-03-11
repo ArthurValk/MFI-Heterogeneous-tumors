@@ -78,25 +78,30 @@ def plot_monte_carlo_mean_ci(
     z = 1.96 if confidence == 0.95 else 1.96
 
     summary = (
-        metrics
-        .filter(pl.col(metric).is_finite())
+        metrics.filter(pl.col(metric).is_finite())
         .group_by(MetricNames.time)
-        .agg([
-            pl.col(metric).mean().alias("mean"),
-            pl.col(metric).std(ddof=1).alias("std"),
-            pl.col(metric).count().alias("n"),
-        ])
+        .agg(
+            [
+                pl.col(metric).mean().alias("mean"),
+                pl.col(metric).std(ddof=1).alias("std"),
+                pl.col(metric).count().alias("n"),
+            ]
+        )
         .sort(MetricNames.time)
-        .with_columns([
-            pl.when(pl.col("n") > 1)
-            .then(pl.col("std") / pl.col("n").sqrt())
-            .otherwise(0.0)
-            .alias("sem")
-        ])
-        .with_columns([
-            (pl.col("mean") - z * pl.col("sem")).alias("lower"),
-            (pl.col("mean") + z * pl.col("sem")).alias("upper"),
-        ])
+        .with_columns(
+            [
+                pl.when(pl.col("n") > 1)
+                .then(pl.col("std") / pl.col("n").sqrt())
+                .otherwise(0.0)
+                .alias("sem")
+            ]
+        )
+        .with_columns(
+            [
+                (pl.col("mean") - z * pl.col("sem")).alias("lower"),
+                (pl.col("mean") + z * pl.col("sem")).alias("upper"),
+            ]
+        )
     )
 
     x = summary[MetricNames.time].to_numpy()
@@ -189,14 +194,13 @@ def plot_genotype_heatmap(genotypes: pl.DataFrame, max_genotypes: int = 100):
     plt.tight_layout()
     plt.show()
 
+
 def plot_final_population_histogram(metrics: pl.DataFrame):
     # find last recorded time
     last_time = metrics[MetricNames.time].max()
 
-    final_counts = (
-        metrics
-        .filter(pl.col(MetricNames.time) == last_time)
-        .select([MetricNames.seed, MetricNames.total_cells])
+    final_counts = metrics.filter(pl.col(MetricNames.time) == last_time).select(
+        [MetricNames.seed, MetricNames.total_cells]
     )
 
     counts = final_counts[MetricNames.total_cells].to_numpy()
@@ -210,6 +214,7 @@ def plot_final_population_histogram(metrics: pl.DataFrame):
     plt.tight_layout()
     plt.show()
 
+
 def main():
     n_runs = 100
     preview_every = 10
@@ -217,9 +222,9 @@ def main():
     base_params = ModelParameters(
         number_of_genes=100,
         carrying_capacity=100000,
-        number_of_generations=24 * 4 * 140,   # 140 days
-        mutation_rate_per_gene = 1e-4,
-        fusion_rate = 1.4e-3,
+        number_of_generations=24 * 4 * 140,  # 140 days
+        mutation_rate_per_gene=1e-4,
+        fusion_rate=1.4e-3,
         growth_rate=0.12 / 48.0,
         death_rate=0.04 / 48.0,
         save_path=Path("Results") / "DecayTreatmentDemo_MC",
@@ -253,7 +258,9 @@ def main():
         if (run_idx + 1) % preview_every == 0:
             lineage = pl.read_csv(result.lineage_path)
 
-            print(f"Previewing lineage plots for simulation {run_idx + 1} (seed={seed})")
+            print(
+                f"Previewing lineage plots for simulation {run_idx + 1} (seed={seed})"
+            )
 
             # per strand / ancestor
             plot_stacked_groups(

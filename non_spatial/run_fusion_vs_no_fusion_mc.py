@@ -23,7 +23,6 @@ def summarize_temporal(metrics_df: pl.DataFrame):
 
 
 def plot_time_series_with_bounds(metrics_on, metrics_off, output_dir):
-
     on_summary = summarize_temporal(metrics_on)
     off_summary = summarize_temporal(metrics_off)
 
@@ -57,7 +56,6 @@ def plot_time_series_with_bounds(metrics_on, metrics_off, output_dir):
 
 
 def plot_final_histograms(metrics_on, metrics_off, output_dir):
-
     final_time = min(
         metrics_on[MetricNames.time].max(),
         metrics_off[MetricNames.time].max(),
@@ -98,7 +96,6 @@ def plot_final_histograms(metrics_on, metrics_off, output_dir):
 
 
 def preview_trajectories(metrics_df, color, label, ax, preview_every=10):
-
     seeds = sorted(metrics_df[MetricNames.seed].unique().to_list())
 
     for s in seeds[::preview_every]:
@@ -124,7 +121,6 @@ def preview_trajectories(metrics_df, color, label, ax, preview_every=10):
 
 
 def plot_preview(metrics_on, metrics_off, output_dir):
-
     fig, ax = plt.subplots(figsize=(11, 6))
 
     preview_trajectories(metrics_on, "blue", "Fusion ON mean", ax)
@@ -142,7 +138,6 @@ def plot_preview(metrics_on, metrics_off, output_dir):
 
 
 def main():
-
     n_runs = 100
     preview_every = 10
 

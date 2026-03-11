@@ -124,7 +124,9 @@ class MonteCarloEngine:
                     metrics_simpson.extend(metrics_array[:, 4].astype(float))
                     metrics_max_mutations.extend(metrics_array[:, 5].astype(int))
                     metrics_drug_concentration.extend(metrics_array[:, 6].astype(float))
-                    metrics_drug_extra_death_wt.extend(metrics_array[:, 7].astype(float))
+                    metrics_drug_extra_death_wt.extend(
+                        metrics_array[:, 7].astype(float)
+                    )
 
                 if all_genotypes_all[i]:
                     genotypes_list = all_genotypes_all[i]

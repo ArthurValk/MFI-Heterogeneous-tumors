@@ -30,8 +30,8 @@ def _(ModelParameters, ModelRun, OUTPUT_PATH):
             dt=0.25,  # 15 minutes
             data_resolution=4,  # store every hour
             number_of_generations=24 * 4 * 140,  # 140 days total
-            mutation_rate_per_gene=1e-4,         # per birth event; unchanged
-            fusion_rate=1e-4 / 48.0,            # scaled from per 12h to per 15min
+            mutation_rate_per_gene=1e-4,  # per birth event; unchanged
+            fusion_rate=1e-4 / 48.0,  # scaled from per 12h to per 15min
             growth_rate=0.12 / 48.0,
             death_rate=0.04 / 48.0,
             save_path=OUTPUT_PATH,

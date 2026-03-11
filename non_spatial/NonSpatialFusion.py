@@ -379,7 +379,9 @@ def same_genotype(a, b):
 
 
 @njit
-def record_lineage_entries(lineage_data, current_time, population_list, use_single_count=False):
+def record_lineage_entries(
+    lineage_data, current_time, population_list, use_single_count=False
+):
     """
     Append lineage entries for each genotype in the population list.
 
@@ -506,12 +508,11 @@ def _ModelRun(
     current_concentration = 0.0
 
     all_genotypes.append(Genotype.copy())
-    genotype_resistance_scores.append(
-        genotype_resistance_score(Genotype, resistivity)
-    )
+    genotype_resistance_scores.append(genotype_resistance_score(Genotype, resistivity))
 
     initial_entry = np.array(
-        [initial_population_size, 0, 0, 0, genotypesCounts, 0, genotypesCounts], dtype=np.int64
+        [initial_population_size, 0, 0, 0, genotypesCounts, 0, genotypesCounts],
+        dtype=np.int64,
     )
     ListePop.append(initial_entry)
 
@@ -847,8 +848,12 @@ def _ModelRun(
             Simpson[l] = ComputeIndex(ListePop, 2)
             Score[l] = MaxScore(ListePop, all_genotypes)
 
-            record_lineage_entries(lineage_data, current_time, ListeExtincted, use_single_count=True)
-            record_lineage_entries(lineage_data, current_time, ListePop, use_single_count=False)
+            record_lineage_entries(
+                lineage_data, current_time, ListeExtincted, use_single_count=True
+            )
+            record_lineage_entries(
+                lineage_data, current_time, ListePop, use_single_count=False
+            )
             record_metrics_row(
                 metrics_data,
                 current_time,
@@ -879,7 +884,9 @@ if __name__ == "__main__":
         number_of_genes=int(sys.argv[2]),
         carrying_capacity=int(sys.argv[3]),
         number_of_generations=int(sys.argv[4]),
-        mutation_rate_per_gene=float(sys.argv[5]),  # per birth event; not rescaled by dt
+        mutation_rate_per_gene=float(
+            sys.argv[5]
+        ),  # per birth event; not rescaled by dt
         fusion_rate=float(sys.argv[6]),  # per hour-scale unit used in the simulator
         growth_rate=float(sys.argv[7]),
         death_rate=float(sys.argv[8]),
