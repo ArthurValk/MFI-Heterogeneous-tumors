@@ -19,35 +19,29 @@ class ModelParameters:
     save_path: Path
 
     # defaults AFTER
-    dt: int = 1
+    dt: float = 0.25  # hours; default = 15 minutes
+    data_resolution: int = 4  # store every 4 steps = every hour if dt=0.25
     diversity: int | None = None
     seed: int | None = None
+    initial_population_size: int = 1
 
-    # treatment controls (defaults AFTER required fields)
-    treatment_every: int | None = None  # e.g. 20 (off-treatment length)
-    treatment_duration: int = 0  # e.g. 20 (on-treatment length)
+    # treatment controls
+    treatment_injection_every: int | None = None  # in simulation steps
+    treatment_initial_concentration: float = 0.25
+    treatment_halflife: float = 12.0  # hours
+    treatment_concentration_to_extra_death: float = (
+        0.7 / 48.0
+    )  # per 15 min by default if original was 0.7 per 12h
 
-    treatment_base_extra_death: float = 0.3  # flat extra death during treatment
-    treatment_selection: float = 0.1  # fraction of genes that confer resistance (10%)
-    treatment_cell_density_dependence: float = (
-        0.0  # scaling factor for cell density effects on treatment efficacy
-    )
+    # resistance controls
+    treatment_selection: float = 0.1
+    treatment_resistivity: float = 1.0
 
 
 @dataclass(frozen=True)
 class ModelResult:
     """Result of the experiment. As model saves files to .csv,
     we return an object referencing these files
-
-    Attributes
-    ----------
-    metrics_path: Path
-        Path to the .csv file containing all metrics
-        (Time, TotalCells, NumGenotypes, ShannonIndex, SimpsonIndex, MaxMutations)
-    lineage_path: Path
-        Path to the .csv file containing the lineage data
-    genotype_path: Path
-        Path to the .csv file containing the genotype data
     """
 
     metrics_path: Path
@@ -65,6 +59,8 @@ class MetricNames:
     shannon_index = "ShannonIndex"
     simpson_index = "SimpsonIndex"
     max_mutations = "MaxMutations"
+    drug_concentration = "DrugConcentration"
+    drug_extra_death_wt = "DrugExtraDeathWT"
 
     # lineage
     cell_count = "TotalCells"

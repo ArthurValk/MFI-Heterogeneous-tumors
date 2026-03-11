@@ -16,12 +16,10 @@ def _():
     import marimo as mo
     import matplotlib.pyplot as plt
 
-    # Add project root to path
     project_root = Path.cwd()
     sys.path.insert(0, str(project_root))
 
     from non_spatial.monte_carlo.visualization import MCVisualization
-
     from non_spatial.parametrization import MetricNames
 
     return MCVisualization, mo, plt, MetricNames
@@ -78,7 +76,6 @@ def _(mo, available_times):
 @app.cell
 def _(mo, time_slider):
     mo.md("""Select time point for empirical distributions:""")
-
     mo.hstack([time_slider])
     return
 
@@ -90,7 +87,7 @@ def _(MCVisualization, metrics_df, plt, time_slider):
     else:
         selected_time = time_slider.value
         MCVisualization.plot_metric_distributions_at_time(
-            metrics_df, selected_time, figsize=(14, 10)
+            metrics_df, selected_time, figsize=(14, 12)
         )
         plt.tight_layout()
         plt.show()
@@ -104,12 +101,14 @@ def _(metrics_df, mo, MetricNames):
         MetricNames.shannon_index,
         MetricNames.simpson_index,
         MetricNames.max_mutations,
+        MetricNames.drug_concentration,
+        MetricNames.drug_extra_death_wt,
     ]
 
     metric_dropdown = (
         mo.ui.dropdown(
             options=metric_choices,
-            value="TotalCells",
+            value=MetricNames.total_cells,
             label="Select metric for temporal trend:",
         )
         if metrics_df is not None
@@ -121,7 +120,6 @@ def _(metrics_df, mo, MetricNames):
 @app.cell
 def _(mo, metric_dropdown):
     mo.md("""Select metric:""")
-
     mo.hstack([metric_dropdown])
     return
 
@@ -139,5 +137,3 @@ def _(MCVisualization, metric_dropdown, metrics_df, plt):
 
 if __name__ == "__main__":
     app.run()
-
-# TODO: add way to globally scale axis, as changing axis scale at different timepoints makes it hard to compare distributions across time.
