@@ -175,7 +175,11 @@ def _(available_times_filtered, mo):
     time_slider_filtered = mo.ui.slider(
         steps=available_times_filtered if available_times_filtered else [],
         label="Select timepoint for empirical distributions:",
-        value=available_times_filtered[len(available_times_filtered) // 2],
+        value=(
+            available_times_filtered[len(available_times_filtered) // 2]
+            if available_times_filtered
+            else None
+        ),
     )
     return (time_slider_filtered,)
 
