@@ -561,6 +561,7 @@ def _ModelRun(
             current_concentration * treatment_concentration_to_extra_death
         )
 
+        #Debug
         if l % 200 == 0:
             print(
                 "step =",
@@ -575,9 +576,11 @@ def _ModelRun(
                 TotalPopulation,
             )
 
+        #Similate population growth and death
         for j in range(0, len(ListePop)):
             nombreRepresentants = ListePop[j][POP_COUNT]
             if nombreRepresentants > 0:
+                #The number of new cells of a population is dependent on the growthRate, number of existing cells and how much time passed.
                 newCells = np.random.poisson(growthRate * nombreRepresentants * DT)
 
                 # mutation remains per birth event; do NOT rescale pm with dt
@@ -586,12 +589,14 @@ def _ModelRun(
                     p_mut = 0.0
                 if p_mut > 1.0:
                     p_mut = 1.0
+                #Number of cells that mutate during Mitosis
                 newM = np.random.binomial(newCells, p_mut)
 
                 genotype_idx = ListePop[j][POP_GENOTYPE]
 
                 base_term = deathRate * (TotalPopulation / KC)
 
+                #Compute death rate for extra deaths during treatment
                 treat_term = 0.0
                 if current_extra_death_wt > 0.0:
                     resistance_score = genotype_resistance_scores[genotype_idx]
@@ -599,11 +604,13 @@ def _ModelRun(
                         resistance_score,
                         current_extra_death_wt,
                     )
-
+                
+                #Overall death rate for this population
                 hazard = (base_term + treat_term) * DT
                 if hazard < 0.0:
                     hazard = 0.0
 
+                #Number of deaths in this population
                 newD = np.random.poisson(hazard * nombreRepresentants)
 
                 countDeads = 0
@@ -612,7 +619,9 @@ def _ModelRun(
 
                 if newD < nombreRepresentants + newCells:
                     while countDeads < newD:
+                        #Pick a random cell
                         m = np.random.randint(1, nombreRepresentants + newCells)
+                        #Check if the cell is a normal (existing or new) cell of this population or if it is new and mutating
                         if (
                             m < nombreRepresentants + newCells - newM
                             and newD1 < nombreRepresentants + newCells - newM
@@ -621,12 +630,14 @@ def _ModelRun(
                         else:
                             newD2 = newD2 + 1
                         countDeads = countDeads + 1
+                    #Remove the cells that died or mutate from the population
                     if ListePop[j][POP_COUNT] + newCells - newM - newD1 > 0:
                         ListePop[j][POP_COUNT] = (
                             ListePop[j][POP_COUNT] + newCells - newM - newD1
                         )
                     else:
                         ListePop[j][POP_COUNT] = 0
+                    #Update the number of mutation cells to remove cells that die
                     if newM - newD2 > 0:
                         ListePop[j][POP_CELLS_TO_MUTATE] = newM - newD2
                     else:
@@ -635,6 +646,7 @@ def _ModelRun(
                     ListePop[j][POP_COUNT] = 0
                     ListePop[j][POP_CELLS_TO_MUTATE] = 0
 
+                #Check if the population is now extinct
                 if ListePop[j][POP_COUNT] == 0:
                     extinct_entry = np.array(
                         [
@@ -652,12 +664,16 @@ def _ModelRun(
 
         j = 0
         Ncurrent = len(ListePop)
+        #Simulate mutations
         while j < Ncurrent:
             for _ in range(0, ListePop[j][POP_CELLS_TO_MUTATE]):
+                #Generate genotype of the mutated cell
                 parent_genotype = all_genotypes[ListePop[j][POP_GENOTYPE]]
                 GenotypeTemporaire = Mutation(parent_genotype)
                 exist = 0
                 count = 0
+
+                #Check if the new mutated genotype already exists
                 while count < len(ListePop) and exist == 0:
                     if same_genotype(
                         all_genotypes[ListePop[count][POP_GENOTYPE]], GenotypeTemporaire
@@ -665,6 +681,8 @@ def _ModelRun(
                         ListePop[count][POP_COUNT] = ListePop[count][POP_COUNT] + 1
                         exist = 1
                     count = count + 1
+
+                #Add new genotype if the mutated cell has a new genotype
                 if exist == 0:
                     genotypesCounts = genotypesCounts + 1
                     all_genotypes.append(GenotypeTemporaire)
@@ -693,6 +711,7 @@ def _ModelRun(
         newH = np.random.poisson(pf * TotalPopulation * DT)
         newH = int(np.minimum(newH, int(TotalPopulation / 2)))
 
+        #Choose cells initiating fusions
         for _ in range(0, newH):
             y = np.random.randint(1, TotalPopulation + 1)
             countPop2 = 0
@@ -708,6 +727,7 @@ def _ModelRun(
                             ListePop[count][POP_FUSION_COUNT] + 1
                         )
 
+                    #Check if the population is now extinct
                     if ListePop[count][POP_COUNT] == 0:
                         extinct_entry = np.array(
                             [
@@ -727,6 +747,7 @@ def _ModelRun(
         Ncurrent = len(ListePop)
         TotalPopulation = countPopulation(ListePop)
 
+        #Execute fussions for all initiating cells
         if TotalPopulation > 0:
             for j in range(0, Ncurrent):
                 for _ in range(0, ListePop[j][POP_FUSION_COUNT]):
@@ -738,6 +759,7 @@ def _ModelRun(
                     ListePop[neighbor][POP_COUNT] = ListePop[neighbor][POP_COUNT] - 1
                     TotalPopulation = TotalPopulation - 2
 
+                    #Check if the populations are now extinct
                     if ListePop[j][POP_COUNT] == 0:
                         extinct_entry = np.array(
                             [
@@ -770,10 +792,12 @@ def _ModelRun(
 
                     Genotype2 = all_genotypes[ListePop[neighbor][POP_GENOTYPE]]
 
+                    #Create hybrids from fusing cells genotype
                     hybrid1, hybrid2 = fusionVect(Genotype1, Genotype2)
 
                     exist = 0
                     count = 0
+                    #Check if hybrid1 has the same genotype as an existing population
                     while count < len(ListePop) and exist == 0:
                         if same_genotype(
                             all_genotypes[ListePop[count][POP_GENOTYPE]], hybrid1
@@ -781,6 +805,7 @@ def _ModelRun(
                             ListePop[count][POP_COUNT] += 1
                             exist = 1
                         count = count + 1
+                    #Add new genotype if hybrid1 has a new genotype
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
                         all_genotypes.append(hybrid1)
@@ -803,6 +828,7 @@ def _ModelRun(
 
                     exist = 0
                     count = 0
+                    #Check if hybrid2 has the same genotype as an existing population
                     while count < len(ListePop) and exist == 0:
                         if same_genotype(
                             all_genotypes[ListePop[count][POP_GENOTYPE]], hybrid2
@@ -810,6 +836,7 @@ def _ModelRun(
                             ListePop[count][POP_COUNT] += 1
                             exist = 1
                         count = count + 1
+                    #Add new genotype if hybrid2 has a new genotype
                     if exist == 0:
                         genotypesCounts = genotypesCounts + 1
                         all_genotypes.append(hybrid2)
@@ -841,6 +868,7 @@ def _ModelRun(
 
         ListePop = cleanData(ListePop)
 
+        #Record relevant metrics for this iteration
         if (l > 0 and l % DATA_RESOLUTION == 0) or l == NgenerationsMax - 1:
             Number[l] = countSpecies(ListePop)
             TotalCells[l] = countPopulation(ListePop)
