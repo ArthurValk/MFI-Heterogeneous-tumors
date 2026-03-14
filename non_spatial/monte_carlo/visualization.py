@@ -178,6 +178,7 @@ class MCVisualization:
         metrics_to_plot: Optional[list[tuple[str, Literal["integer", "float"]]]] = None,
         figsize: tuple = (14, 12),
         color_index: int = 0,
+        label: Optional[str] = None,
     ) -> matplotlib.figure.Figure:
         """Plot distributions of multiple metrics at a single timepoint.
 
@@ -193,6 +194,8 @@ class MCVisualization:
             Figure size (default: (14, 10))
         color_index : int, optional
             Index into COLORS list for histogram color (default: 0)
+        label : str, optional
+            Label to include in the title (e.g., parameter combination)
 
         Returns
         -------
@@ -244,10 +247,14 @@ class MCVisualization:
         for idx in range(n_plots, len(axes)):
             axes[idx].set_visible(False)
 
-        fig.suptitle(
-            f"Metric Distributions at Time={time}", fontsize=14, fontweight="bold"
-        )
-        fig.tight_layout()
+        # Build title with optional label on separate line
+        if label:
+            title = f"Metric Distributions at Time={time}\n{label}"
+        else:
+            title = f"Metric Distributions at Time={time}"
+
+        fig.suptitle(title, fontsize=14, fontweight="bold")
+        fig.tight_layout(rect=[0, 0, 1, 0.96])  # Reserve space for multi-line suptitle
 
         return fig
 

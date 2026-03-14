@@ -216,7 +216,13 @@ def _(mo):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, filtered_metrics, time_slider_filtered):
+def _(
+    MCVisualization,
+    MetricNames,
+    filtered_metrics,
+    selected_params,
+    time_slider_filtered,
+):
     # Empirical distributions at selected time:
     _selected_time = time_slider_filtered.value
     _metrics_to_plot = [
@@ -224,12 +230,15 @@ def _(MCVisualization, MetricNames, filtered_metrics, time_slider_filtered):
         (MetricNames.num_genotypes, "integer"),
         (MetricNames.max_mutations, "integer"),
     ]
+    # Build label from selected parameters
+    _label = ", ".join(f"{k}={v}" for k, v in selected_params.items())
     _dist_fig = MCVisualization.plot_metric_distributions_at_time(
         filtered_metrics,
         _selected_time,
         metrics_to_plot=_metrics_to_plot,
-        figsize=(12, 4),
+        figsize=(12, 8),
         color_index=0,
+        label=_label,
     )
     _dist_fig
     return
@@ -475,12 +484,17 @@ def _(
 
             _filtered_df = lazy_metrics.filter(_combo_cond).collect()
             if len(_filtered_df) > 0 and MetricNames.time in _filtered_df.columns:
+                # Build label from parameter values
+                _combo_param_label = ", ".join(
+                    f"{k}={v}" for k, v in _param_dict.items()
+                )
                 _fig = MCVisualization.plot_metric_distributions_at_time(
                     _filtered_df,
                     _selected_time,
                     metrics_to_plot=_metrics_to_plot,
                     figsize=(12, 8),
                     color_index=_combo_idx,
+                    label=_combo_param_label,
                 )
                 _figs.append(_fig)
 
