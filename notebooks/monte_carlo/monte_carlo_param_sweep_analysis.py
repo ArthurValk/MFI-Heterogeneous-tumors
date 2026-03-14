@@ -34,7 +34,7 @@ def _():
 
 @app.cell
 def _(TEST_OUTPUT_PATH, mo):
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_11"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_10"
     from non_spatial.monte_carlo.monte_carlo import _load_metadata
 
     metadata = _load_metadata(output_dir)
@@ -132,20 +132,26 @@ def _(MCVisualization, MetricNames, filtered_metrics, plt):
             MetricNames.simpson_index,
         ]
 
-        _fig, _axes = plt.subplots(3, 2, figsize=(14, 10))
-        _axes[-1, -1].axis("off")
-        _axes = _axes.flatten()
+        _fig = plt.figure(figsize=(14, 10))
+        # Main grid: 3 rows × 2 column-pairs (left and right)
+        _main_gs = plt.GridSpec(3, 2, hspace=0.35, wspace=0.15)
 
         for _idx, _metric in enumerate(_metrics_to_viz):
             if _metric in filtered_metrics.columns:
+                _row = _idx // 2
+                _pair = _idx % 2  # 0 for left pair, 1 for right pair
+                # Nested grid within each pair: 1 row × 2 cols (trend, violin) with no spacing
+                _nested_gs = _main_gs[_row, _pair].subgridspec(1, 2, width_ratios=[6, 1], wspace=0.15)
+                _ax_trend = _fig.add_subplot(_nested_gs[0, 0])
+                _ax_violin = _fig.add_subplot(_nested_gs[0, 1], sharey=_ax_trend)
                 MCVisualization.plot_temporal_trend(
                     filtered_metrics,
                     _metric,
-                    ax=_axes[_idx],
+                    ax_trend=_ax_trend,
+                    ax_violin=_ax_violin,
                     percentile=5.0,
                 )
 
-        plt.tight_layout()
 
     _fig
     return
@@ -372,19 +378,25 @@ def _(
                 MetricNames.simpson_index,
             ]
 
-            _fig, _axes = plt.subplots(3, 2, figsize=(16, 12))
-            _axes[-1, -1].axis("off")
-            _axes = _axes.flatten()
+            _fig = plt.figure(figsize=(16, 12))
+            # Main grid: 3 rows × 2 column-pairs (left and right)
+            _main_gs = plt.GridSpec(3, 2, hspace=0.35, wspace=0.15)
 
             for _idx, _metric in enumerate(_metrics_to_plot):
+                _row = _idx // 2
+                _pair = _idx % 2  # 0 for left pair, 1 for right pair
+                # Nested grid within each pair: 1 row × 2 cols (trend, violin) with no spacing
+                _nested_gs = _main_gs[_row, _pair].subgridspec(1, 2, width_ratios=[6, 1], wspace=0.15)
+                _ax_trend = _fig.add_subplot(_nested_gs[0, 0])
+                _ax_violin = _fig.add_subplot(_nested_gs[0, 1], sharey=_ax_trend)
                 MCVisualization.plot_temporal_trend(
                     _dfs,
                     _metric,
-                    ax=_axes[_idx],
+                    ax_trend=_ax_trend,
+                    ax_violin=_ax_violin,
                     percentile=5.0,
                 )
 
-            plt.tight_layout()
         else:
             _fig = None
 
