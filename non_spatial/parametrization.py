@@ -37,6 +37,7 @@ class ModelParameters:
     # resistance controls
     treatment_selection: float = 0.1
     treatment_resistivity: float = 1.0
+    treatment_epistasis: float = 1.0
 
 
 ModelParametersTyping = Literal[
@@ -55,6 +56,7 @@ ModelParametersTyping = Literal[
     "treatment_concentration_to_extra_death",
     "treatment_selection",
     "treatment_resistivity",
+    "treatment_epistasis",
 ]
 
 

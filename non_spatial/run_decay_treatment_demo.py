@@ -239,6 +239,7 @@ def main():
         treatment_concentration_to_extra_death=0.7,
         treatment_selection=0.1,
         treatment_resistivity=1.0,
+        treatment_epistasis=1.3,
     )
 
     all_metrics = []

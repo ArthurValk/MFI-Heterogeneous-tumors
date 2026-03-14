@@ -46,31 +46,34 @@ def _(ModelParameters, ModelParametersTyping, TEST_OUTPUT_PATH, marimo):
     import numpy as np
 
     # Define parameter sweep configuration
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_4"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_11"
 
     # Base parameters (fixed for all sweep combinations)
     base_params = ModelParameters(
         number_of_genes=100,
-        carrying_capacity=3000,
+        carrying_capacity=100000,
         number_of_generations=24 * 4 * 140,  # 140 days, 15-minute steps
         mutation_rate_per_gene=1e-4,  # per birth event -> unchanged
-        fusion_rate=1e-4 / 48.0,  # rescaled from per-12h to per-15min
+        fusion_rate=1.4e-3,  # rescaled from per-12h to per-15min
         growth_rate=0.12 / 48.0,  # rescaled from per-12h to per-15min
         death_rate=0.04 / 48.0,  # rescaled from per-12h to per-15min
         save_path=output_dir,
         dt=0.25,  # 15 minutes = 0.25 hours
         data_resolution=24 * 4,  # store every day to prevent file size from exploding
         diversity=1,
+        initial_population_size=1000,
         seed=0,
         treatment_injection_every=21 * 24 * 4,  # every 3 weeks
         treatment_initial_concentration=0.25,
         treatment_halflife=12.0,  # 12 hours
-        treatment_concentration_to_extra_death=0.7 / 48.0,  # per 15 min
+        treatment_concentration_to_extra_death=0.7,  # per 15 min
         treatment_selection=0.1,
         treatment_resistivity=1.0,
+        treatment_epistasis=1.0,
     )
     sweep_params: dict[ModelParametersTyping, np.ndarray] = {
-        "mutation_rate_per_gene": np.array([1e-4, 1e-5]),
+        "fusion_rate": np.array([0, 1.4e-3]),
+        "treatment_epistasis": np.array([0.5, 0.7, 1.0, 1.3, 1.5]),
     }
 
     from typing import get_args
