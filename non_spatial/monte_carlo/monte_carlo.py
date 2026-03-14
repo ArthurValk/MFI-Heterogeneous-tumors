@@ -247,6 +247,20 @@ class MonteCarloEngine:
         param_values = [sweep_params[name] for name in param_names]
         combinations = list(itertools.product(*param_values))
 
+        # Store metadata about the sweep early (machine-independent)
+        # This allows analysis notebooks to start working while simulations run
+        sweep_metadata = {
+            "param_grids": {name: sweep_params[name].tolist() for name in param_names},
+            "num_combinations": len(combinations),
+            "num_seeds": len(seeds),
+            "total_runs": len(combinations) * len(seeds),
+        }
+
+        # Save sweep metadata immediately
+        metadata_path = save_path / "sweep_metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(sweep_metadata, f, indent=2)
+
         for combo_values in combinations:
             combo_params = _update_model_parameters(
                 parameters, param_names, combo_values
@@ -273,19 +287,6 @@ class MonteCarloEngine:
             # Clean up between parameter combinations
             del combo_params, combo_dir
             gc.collect()
-
-        # Store metadata about the sweep (machine-independent)
-        sweep_metadata = {
-            "param_grids": {name: sweep_params[name].tolist() for name in param_names},
-            "num_combinations": len(combinations),
-            "num_seeds": len(seeds),
-            "total_runs": len(combinations) * len(seeds),
-        }
-
-        # Save sweep metadata
-        metadata_path = save_path / "sweep_metadata.json"
-        with open(metadata_path, "w") as f:
-            json.dump(sweep_metadata, f, indent=2)
 
 
 class OutputFiles:

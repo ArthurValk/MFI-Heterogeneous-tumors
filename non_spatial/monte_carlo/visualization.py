@@ -8,6 +8,7 @@ import polars as pl
 import matplotlib.pyplot as plt
 import matplotlib.axes
 import matplotlib.figure
+import matplotlib.gridspec
 from scipy import stats
 
 from non_spatial.parametrization import MetricNames
@@ -78,7 +79,9 @@ class MCVisualization:
         return sorted(metrics_df[MetricNames.time].unique().to_list())
 
     @staticmethod
-    def get_metrics_at_time(metrics_df: pl.DataFrame, time: int | float) -> pl.DataFrame:
+    def get_metrics_at_time(
+        metrics_df: pl.DataFrame, time: int | float
+    ) -> pl.DataFrame:
         """Filter metrics dataframe to a specific timepoint.
 
         Parameters
@@ -102,6 +105,7 @@ class MCVisualization:
         bins: int = 30,
         ax: Optional[matplotlib.axes.Axes] = None,
         integer_valued: bool = False,
+        color_index: int = 0,
     ) -> matplotlib.axes.Axes:
         """Plot empirical probability distribution (histogram + KDE).
 
@@ -117,6 +121,8 @@ class MCVisualization:
             Axes to plot on (creates new if None)
         integer_valued : bool, optional
             If True, aligns bins to integer boundaries for integer-valued data (default: False)
+        color_index : int, optional
+            Index into COLORS list for histogram color (default: 0)
 
         Returns
         -------
@@ -141,12 +147,13 @@ class MCVisualization:
             bins = np.arange(min_val - 0.5, max_val + 1.5, 1)
 
         # Histogram
+        plot_color = COLORS[color_index % len(COLORS)]
         ax.hist(
             clean_data,
             bins=bins,
             density=True,
             alpha=0.6,
-            color="steelblue",
+            color=plot_color,
             edgecolor="black",
         )
 
@@ -170,6 +177,8 @@ class MCVisualization:
         time: int | float,
         metrics_to_plot: Optional[list[tuple[str, Literal["integer", "float"]]]] = None,
         figsize: tuple = (14, 12),
+        color_index: int = 0,
+        label: Optional[str] = None,
     ) -> matplotlib.figure.Figure:
         """Plot distributions of multiple metrics at a single timepoint.
 
@@ -183,6 +192,10 @@ class MCVisualization:
             List of (column_name, value_type) tuples to plot. If None, plots standard metrics.
         figsize : tuple, optional
             Figure size (default: (14, 10))
+        color_index : int, optional
+            Index into COLORS list for histogram color (default: 0)
+        label : str, optional
+            Label to include in the title (e.g., parameter combination)
 
         Returns
         -------
@@ -227,56 +240,83 @@ class MCVisualization:
                 title=f"{metric} at t={time}",
                 ax=axes[idx],
                 integer_valued=is_integer,
+                color_index=color_index,
             )
 
         # Hide unused subplots
         for idx in range(n_plots, len(axes)):
             axes[idx].set_visible(False)
 
-        fig.suptitle(
-            f"Metric Distributions at Time={time}", fontsize=14, fontweight="bold"
-        )
-        fig.tight_layout()
+        # Build title with optional label on separate line
+        if label:
+            title = f"Metric Distributions at Time={time}\n{label}"
+        else:
+            title = f"Metric Distributions at Time={time}"
+
+        fig.suptitle(title, fontsize=14, fontweight="bold")
+        fig.tight_layout(rect=[0, 0, 1, 0.96])  # Reserve space for multi-line suptitle
 
         return fig
 
     @staticmethod
     def plot_temporal_trend(
-        metrics_df: pl.DataFrame | Sequence[pl.DataFrame],
+        metrics_df: pl.DataFrame
+        | tuple[pl.DataFrame, str]
+        | Sequence[pl.DataFrame | tuple[pl.DataFrame, str]],
         metric: str,
-        ax: Optional[matplotlib.axes.Axes] = None,
+        ax_trend: Optional[matplotlib.axes.Axes] = None,
+        ax_violin: Optional[matplotlib.axes.Axes] = None,
         percentile: float = 5.0,
-    ) -> matplotlib.axes.Axes:
+    ) -> tuple[matplotlib.axes.Axes, Optional[matplotlib.axes.Axes]]:
         """Plot temporal trend of a metric across time with mean and quantiles.
 
         For single dataframe: shows mean line with percentile band across all seeds.
         For multiple experiments: shows mean and quantiles across experiment summaries.
+        Optionally shows terminal distribution via violin plot on the right.
 
         Parameters
         ----------
-        metrics_df : pl.DataFrame | Sequence[pl.DataFrame]
-            Single metrics dataframe or sequence of dataframes (from multiple experiments)
+        metrics_df : pl.DataFrame | tuple[pl.DataFrame, str] | Sequence[pl.DataFrame | tuple[pl.DataFrame, str]]
+            Can be any of:
+            - Single DataFrame: uses default "Exp 1" label
+            - Single (DataFrame, label) tuple: uses provided label
+            - Sequence of DataFrames: uses default "Exp 1", "Exp 2", etc. labels
+            - Sequence of (DataFrame, label) tuples: uses provided labels
         metric : str
             Column name to plot
-        ax : matplotlib.axes.Axes, optional
-            Axes to plot on (creates new if None)
+        ax_trend : matplotlib.axes.Axes, optional
+            Axes for temporal trend plot (creates new if None)
+        ax_violin : matplotlib.axes.Axes, optional
+            Axes for violin plot (if provided, must share y-axis with ax_trend via GridSpec)
         percentile : float, optional
             Percentile for bands (default: 5.0, shows 5th-95th percentile range)
 
         Returns
         -------
-        matplotlib.axes.Axes
-            Axes object with the plot
+        tuple[matplotlib.axes.Axes, Optional[matplotlib.axes.Axes]]
+            (ax_trend, ax_violin) - both axes or (ax_trend, None) if no violin plot
         """
-        if ax is None:
-            _, ax = plt.subplots(figsize=(10, 6))
+        # Handle single DataFrame, single tuple, or sequence of DataFrames/tuples
+        if isinstance(metrics_df, pl.DataFrame):
+            dfs_with_labels = [(metrics_df, None)]
+        elif isinstance(metrics_df, tuple):
+            # Single (DataFrame, label) tuple
+            dfs_with_labels = [metrics_df]
+        else:
+            # Sequence of DataFrames or (DataFrame, label) tuples
+            dfs_with_labels = [
+                (item, None) if isinstance(item, pl.DataFrame) else item
+                for item in metrics_df
+            ]
 
-        # Handle both single and multiple dataframes uniformly
-        dfs = [metrics_df] if isinstance(metrics_df, pl.DataFrame) else list(metrics_df)
+        if ax_trend is None:
+            _, ax_trend = plt.subplots(figsize=(10, 6))
 
         # Plot each dataframe with its own color
-        for idx, df in enumerate(dfs):
+        for idx, (df, label) in enumerate(dfs_with_labels):
             clean_data = df.filter(pl.col(metric).is_finite())
+            # Use provided label or default to "Exp N"
+            exp_label = label if label is not None else f"Exp {idx + 1}"
 
             # Compute mean and quantiles across seeds at each time point
             grouped = (
@@ -303,28 +343,83 @@ class MCVisualization:
             color = COLORS[idx % len(COLORS)]
 
             # Plot percentile band
-            ax.fill_between(
+            ax_trend.fill_between(
                 times,
                 values_lower,
                 values_upper,
                 alpha=0.2,
                 color=color,
-                label=f"Exp {idx + 1}: {percentile:.0f}th-{100.0 - percentile:.0f}th percentile",
+                label=f"{exp_label}",
             )
 
-            ax.plot(
+            ax_trend.plot(
                 times,
                 values_mean,
                 color=color,
                 linewidth=2.5,
-                label=f"Exp {idx + 1}: Mean",
+                label=None,  # Skip mean line in legend to reduce clutter
                 zorder=10,
             )
 
-        ax.set_xlabel("Time (hours)", fontsize=11)
-        ax.set_ylabel(metric, fontsize=11)
-        ax.set_title(f"{metric} over Time", fontsize=12, fontweight="bold")
-        ax.grid(True, alpha=0.3)
-        ax.legend()
+            # Plot violin for terminal distribution if requested
+            if ax_violin is not None:
+                # Get terminal time and values for this experiment
+                terminal_time = clean_data[MetricNames.time].max()
+                terminal_values = clean_data.filter(
+                    pl.col(MetricNames.time) == terminal_time
+                )[metric].to_numpy()
 
-        return ax
+                # Clip violin data to percentile range to match temporal trend bounds
+                lower_percentile = np.percentile(terminal_values, percentile)
+                upper_percentile = np.percentile(terminal_values, 100.0 - percentile)
+                terminal_values_clipped = terminal_values[
+                    (terminal_values >= lower_percentile)
+                    & (terminal_values <= upper_percentile)
+                ]
+
+                # Position violins to overlap: center around 1.0
+                if len(dfs_with_labels) == 1:
+                    pos = 1.0
+                else:
+                    # Offset based on experiment index, centered around 1.0
+                    offset = (idx - (len(dfs_with_labels) - 1) / 2) * 0.15
+                    pos = 1.0 + offset
+
+                # Plot violin with overlapping position (no whiskers to avoid redundancy)
+                parts = ax_violin.violinplot(
+                    [terminal_values_clipped],
+                    positions=[pos],
+                    widths=0.7,
+                    showmeans=True,
+                    showmedians=True,
+                    showextrema=False,
+                )
+
+                # Color the violin to match the trend line
+                for pc in parts["bodies"]:
+                    pc.set_facecolor(color)
+                    pc.set_alpha(0.2)  # Match trend area alpha
+                for partname in ("cbars", "cmins", "cmaxes", "cmedians", "cmeans"):
+                    if partname in parts:
+                        parts[partname].set_color(color)
+                        parts[partname].set_linewidth(1.5)
+
+        ax_trend.set_xlabel("Time (hours)", fontsize=11)
+        ax_trend.set_ylabel(metric, fontsize=11)
+        ax_trend.set_title(
+            f"{metric} over Time\n({percentile:.0f}th-{100.0 - percentile:.0f}th percentile)",
+            fontsize=12,
+            fontweight="bold",
+        )
+        ax_trend.grid(True, alpha=0.3)
+        ax_trend.legend()
+
+        if ax_violin is not None:
+            # Since violins overlap, just show a single x-label
+            ax_violin.set_xticks([1.0])
+            ax_violin.set_xticklabels(["Final\ndistribution"], fontsize=8)
+            # Hide y-axis labels on violin plot (trend plot keeps them via sharey)
+            ax_violin.tick_params(labelleft=False, left=False)
+            ax_violin.grid(True, alpha=0.3, axis="y")
+
+        return (ax_trend, ax_violin)

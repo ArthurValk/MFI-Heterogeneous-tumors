@@ -26,14 +26,15 @@ def _():
     from non_spatial.parametrization import MetricNames
     from non_spatial.monte_carlo.visualization import MCVisualization
     from tests.test_files.test_monte_carlo import TEST_MC_PATH
+    from tests.test_output import TEST_OUTPUT_PATH
     import polars as pl
 
-    return MCVisualization, MetricNames, TEST_MC_PATH, mo, pl, plt
+    return MCVisualization, MetricNames, TEST_MC_PATH, mo, pl, plt, TEST_OUTPUT_PATH
 
 
 @app.cell
-def _(TEST_MC_PATH, mo):
-    output_dir = TEST_MC_PATH / "param_sweep_4"
+def _(TEST_OUTPUT_PATH, mo):
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_10"
     from non_spatial.monte_carlo.monte_carlo import _load_metadata
 
     metadata = _load_metadata(output_dir)
@@ -121,30 +122,38 @@ def _(mo):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, filtered_metrics, plt):
+def _(MCVisualization, MetricNames, filtered_metrics, selected_params, plt):
     if filtered_metrics is not None and len(filtered_metrics) > 0:
         _metrics_to_viz = [
             MetricNames.total_cells,
             MetricNames.num_genotypes,
             MetricNames.max_mutations,
-            MetricNames.shannon_index,
-            MetricNames.simpson_index,
         ]
 
-        _fig, _axes = plt.subplots(3, 2, figsize=(14, 10))
-        _axes[-1, -1].axis("off")
-        _axes = _axes.flatten()
+        # Build label from selected parameters
+        _label = ", ".join(f"{k}={v}" for k, v in selected_params.items())
+
+        _fig = plt.figure(figsize=(16, 12))
+        # Main grid: 3 rows × 2 column-pairs (left and right)
+        _main_gs = plt.GridSpec(3, 2, hspace=0.35, wspace=0.15)
 
         for _idx, _metric in enumerate(_metrics_to_viz):
             if _metric in filtered_metrics.columns:
+                _row = _idx // 2
+                _pair = _idx % 2  # 0 for left pair, 1 for right pair
+                # Nested grid within each pair: 1 row × 2 cols (trend, violin) with no spacing
+                _nested_gs = _main_gs[_row, _pair].subgridspec(
+                    1, 2, width_ratios=[6, 1], wspace=0.15
+                )
+                _ax_trend = _fig.add_subplot(_nested_gs[0, 0])
+                _ax_violin = _fig.add_subplot(_nested_gs[0, 1], sharey=_ax_trend)
                 MCVisualization.plot_temporal_trend(
-                    filtered_metrics,
+                    (filtered_metrics, _label),
                     _metric,
-                    ax=_axes[_idx],
+                    ax_trend=_ax_trend,
+                    ax_violin=_ax_violin,
                     percentile=5.0,
                 )
-
-        plt.tight_layout()
 
     _fig
     return
@@ -207,23 +216,29 @@ def _(mo):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, filtered_metrics, time_slider_filtered):
+def _(
+    MCVisualization,
+    MetricNames,
+    filtered_metrics,
+    selected_params,
+    time_slider_filtered,
+):
     # Empirical distributions at selected time:
     _selected_time = time_slider_filtered.value
     _metrics_to_plot = [
         (MetricNames.total_cells, "float"),
         (MetricNames.num_genotypes, "integer"),
         (MetricNames.max_mutations, "integer"),
-        (MetricNames.shannon_index, "float"),
-        (MetricNames.simpson_index, "float"),
-        (MetricNames.drug_concentration, "float"),
-        (MetricNames.drug_extra_death_wt, "float"),
     ]
+    # Build label from selected parameters
+    _label = ", ".join(f"{k}={v}" for k, v in selected_params.items())
     _dist_fig = MCVisualization.plot_metric_distributions_at_time(
         filtered_metrics,
         _selected_time,
         metrics_to_plot=_metrics_to_plot,
         figsize=(12, 8),
+        color_index=0,
+        label=_label,
     )
     _dist_fig
     return
@@ -344,7 +359,7 @@ def _(
 ):
     # Filter lazy_metrics by selected parameter combinations
     _selected_combos = combo_multiselect.value if combo_multiselect.value else []
-    _dfs = []
+    _dfs_with_labels = []
 
     if not _selected_combos:
         _fig = None
@@ -360,30 +375,41 @@ def _(
                 )
             _combo_data = lazy_metrics.filter(_combo_cond).collect()
             if len(_combo_data) > 0:
-                _dfs.append(_combo_data)
+                # Build label from parameter values
+                _label = ", ".join(f"{k}={v}" for k, v in _param_dict.items())
+                _dfs_with_labels.append((_combo_data, _label))
 
-        if _dfs and MetricNames.total_cells in _dfs[0].columns:
+        if (
+            _dfs_with_labels
+            and MetricNames.total_cells in _dfs_with_labels[0][0].columns
+        ):
             _metrics_to_plot = [
                 MetricNames.total_cells,
                 MetricNames.num_genotypes,
                 MetricNames.max_mutations,
-                MetricNames.shannon_index,
-                MetricNames.simpson_index,
             ]
 
-            _fig, _axes = plt.subplots(3, 2, figsize=(16, 12))
-            _axes[-1, -1].axis("off")
-            _axes = _axes.flatten()
+            _fig = plt.figure(figsize=(16, 12))
+            # Main grid: 3 rows × 2 column-pairs (left and right)
+            _main_gs = plt.GridSpec(3, 2, hspace=0.35, wspace=0.15)
 
             for _idx, _metric in enumerate(_metrics_to_plot):
+                _row = _idx // 2
+                _pair = _idx % 2  # 0 for left pair, 1 for right pair
+                # Nested grid within each pair: 1 row × 2 cols (trend, violin) with no spacing
+                _nested_gs = _main_gs[_row, _pair].subgridspec(
+                    1, 2, width_ratios=[6, 1], wspace=0.15
+                )
+                _ax_trend = _fig.add_subplot(_nested_gs[0, 0])
+                _ax_violin = _fig.add_subplot(_nested_gs[0, 1], sharey=_ax_trend)
                 MCVisualization.plot_temporal_trend(
-                    _dfs,
+                    _dfs_with_labels,
                     _metric,
-                    ax=_axes[_idx],
+                    ax_trend=_ax_trend,
+                    ax_violin=_ax_violin,
                     percentile=5.0,
                 )
 
-            plt.tight_layout()
         else:
             _fig = None
 
@@ -443,14 +469,10 @@ def _(
             (MetricNames.total_cells, "float"),
             (MetricNames.num_genotypes, "integer"),
             (MetricNames.max_mutations, "integer"),
-            (MetricNames.shannon_index, "float"),
-            (MetricNames.simpson_index, "float"),
-            (MetricNames.drug_concentration, "float"),
-            (MetricNames.drug_extra_death_wt, "float"),
         ]
 
         # Collect distributions for each parameter combination at selected time
-        for _combo_label in sorted(_selected_combos):
+        for _combo_idx, _combo_label in enumerate(sorted(_selected_combos)):
             _param_dict = combo_to_params[_combo_label]
             # Build filter for this combo
             _combo_cond = None
@@ -462,11 +484,17 @@ def _(
 
             _filtered_df = lazy_metrics.filter(_combo_cond).collect()
             if len(_filtered_df) > 0 and MetricNames.time in _filtered_df.columns:
+                # Build label from parameter values
+                _combo_param_label = ", ".join(
+                    f"{k}={v}" for k, v in _param_dict.items()
+                )
                 _fig = MCVisualization.plot_metric_distributions_at_time(
                     _filtered_df,
                     _selected_time,
                     metrics_to_plot=_metrics_to_plot,
                     figsize=(12, 8),
+                    color_index=_combo_idx,
+                    label=_combo_param_label,
                 )
                 _figs.append(_fig)
 

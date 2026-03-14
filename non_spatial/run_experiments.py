@@ -13,7 +13,7 @@ baseline_params = ModelParameters(
     carrying_capacity=3000,
     number_of_generations=24 * 4 * 140,  # 140 days, 15-minute steps
     mutation_rate_per_gene=1e-4,  # per birth event -> unchanged
-    fusion_rate=1e-4 / 48.0,  # rescaled from per-12h to per-15min
+    fusion_rate=1e-4,  # rescaled from per-12h to per-15min
     growth_rate=0.12 / 48.0,  # rescaled from per-12h to per-15min
     death_rate=0.04 / 48.0,  # rescaled from per-12h to per-15min
     save_path=OUTPUT_PATH,
@@ -27,6 +27,7 @@ baseline_params = ModelParameters(
     treatment_concentration_to_extra_death=0.7 / 48.0,  # per 15 min
     treatment_selection=0.1,
     treatment_resistivity=1.0,
+    treatment_epistasis=1.3,
 )
 
 result = ModelRun(parameters=baseline_params)
