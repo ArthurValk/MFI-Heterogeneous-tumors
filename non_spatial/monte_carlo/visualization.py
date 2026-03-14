@@ -245,7 +245,9 @@ class MCVisualization:
 
     @staticmethod
     def plot_temporal_trend(
-        metrics_df: pl.DataFrame | Sequence[pl.DataFrame],
+        metrics_df: pl.DataFrame
+        | tuple[pl.DataFrame, str]
+        | Sequence[pl.DataFrame | tuple[pl.DataFrame, str]],
         metric: str,
         ax_trend: Optional[matplotlib.axes.Axes] = None,
         ax_violin: Optional[matplotlib.axes.Axes] = None,
@@ -259,8 +261,12 @@ class MCVisualization:
 
         Parameters
         ----------
-        metrics_df : pl.DataFrame | Sequence[pl.DataFrame]
-            Single metrics dataframe or sequence of dataframes (from multiple experiments)
+        metrics_df : pl.DataFrame | tuple[pl.DataFrame, str] | Sequence[pl.DataFrame | tuple[pl.DataFrame, str]]
+            Can be any of:
+            - Single DataFrame: uses default "Exp 1" label
+            - Single (DataFrame, label) tuple: uses provided label
+            - Sequence of DataFrames: uses default "Exp 1", "Exp 2", etc. labels
+            - Sequence of (DataFrame, label) tuples: uses provided labels
         metric : str
             Column name to plot
         ax_trend : matplotlib.axes.Axes, optional
@@ -275,15 +281,27 @@ class MCVisualization:
         tuple[matplotlib.axes.Axes, Optional[matplotlib.axes.Axes]]
             (ax_trend, ax_violin) - both axes or (ax_trend, None) if no violin plot
         """
-        # Handle both single and multiple dataframes uniformly
-        dfs = [metrics_df] if isinstance(metrics_df, pl.DataFrame) else list(metrics_df)
+        # Handle single DataFrame, single tuple, or sequence of DataFrames/tuples
+        if isinstance(metrics_df, pl.DataFrame):
+            dfs_with_labels = [(metrics_df, None)]
+        elif isinstance(metrics_df, tuple):
+            # Single (DataFrame, label) tuple
+            dfs_with_labels = [metrics_df]
+        else:
+            # Sequence of DataFrames or (DataFrame, label) tuples
+            dfs_with_labels = [
+                (item, None) if isinstance(item, pl.DataFrame) else item
+                for item in metrics_df
+            ]
 
         if ax_trend is None:
             _, ax_trend = plt.subplots(figsize=(10, 6))
 
         # Plot each dataframe with its own color
-        for idx, df in enumerate(dfs):
+        for idx, (df, label) in enumerate(dfs_with_labels):
             clean_data = df.filter(pl.col(metric).is_finite())
+            # Use provided label or default to "Exp N"
+            exp_label = label if label is not None else f"Exp {idx + 1}"
 
             # Compute mean and quantiles across seeds at each time point
             grouped = (
@@ -316,7 +334,7 @@ class MCVisualization:
                 values_upper,
                 alpha=0.2,
                 color=color,
-                label=f"Exp {idx + 1}: {percentile:.0f}th-{100.0 - percentile:.0f}th percentile",
+                label=f"{exp_label}",
             )
 
             ax_trend.plot(
@@ -324,7 +342,7 @@ class MCVisualization:
                 values_mean,
                 color=color,
                 linewidth=2.5,
-                label=f"Exp {idx + 1}: Mean",
+                label=None,  # Skip mean line in legend to reduce clutter
                 zorder=10,
             )
 
@@ -340,15 +358,16 @@ class MCVisualization:
                 lower_percentile = np.percentile(terminal_values, percentile)
                 upper_percentile = np.percentile(terminal_values, 100.0 - percentile)
                 terminal_values_clipped = terminal_values[
-                    (terminal_values >= lower_percentile) & (terminal_values <= upper_percentile)
+                    (terminal_values >= lower_percentile)
+                    & (terminal_values <= upper_percentile)
                 ]
 
                 # Position violins to overlap: center around 1.0
-                if len(dfs) == 1:
+                if len(dfs_with_labels) == 1:
                     pos = 1.0
                 else:
                     # Offset based on experiment index, centered around 1.0
-                    offset = (idx - (len(dfs) - 1) / 2) * 0.15
+                    offset = (idx - (len(dfs_with_labels) - 1) / 2) * 0.15
                     pos = 1.0 + offset
 
                 # Plot violin with overlapping position (no whiskers to avoid redundancy)
@@ -372,7 +391,11 @@ class MCVisualization:
 
         ax_trend.set_xlabel("Time (hours)", fontsize=11)
         ax_trend.set_ylabel(metric, fontsize=11)
-        ax_trend.set_title(f"{metric} over Time", fontsize=12, fontweight="bold")
+        ax_trend.set_title(
+            f"{metric} over Time\n({percentile:.0f}th-{100.0 - percentile:.0f}th percentile)",
+            fontsize=12,
+            fontweight="bold",
+        )
         ax_trend.grid(True, alpha=0.3)
         ax_trend.legend()
 

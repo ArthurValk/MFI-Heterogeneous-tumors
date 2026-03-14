@@ -122,17 +122,18 @@ def _(mo):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, filtered_metrics, plt):
+def _(MCVisualization, MetricNames, filtered_metrics, selected_params, plt):
     if filtered_metrics is not None and len(filtered_metrics) > 0:
         _metrics_to_viz = [
             MetricNames.total_cells,
             MetricNames.num_genotypes,
             MetricNames.max_mutations,
-            MetricNames.shannon_index,
-            MetricNames.simpson_index,
         ]
 
-        _fig = plt.figure(figsize=(14, 10))
+        # Build label from selected parameters
+        _label = ", ".join(f"{k}={v}" for k, v in selected_params.items())
+
+        _fig = plt.figure(figsize=(16, 12))
         # Main grid: 3 rows × 2 column-pairs (left and right)
         _main_gs = plt.GridSpec(3, 2, hspace=0.35, wspace=0.15)
 
@@ -141,17 +142,18 @@ def _(MCVisualization, MetricNames, filtered_metrics, plt):
                 _row = _idx // 2
                 _pair = _idx % 2  # 0 for left pair, 1 for right pair
                 # Nested grid within each pair: 1 row × 2 cols (trend, violin) with no spacing
-                _nested_gs = _main_gs[_row, _pair].subgridspec(1, 2, width_ratios=[6, 1], wspace=0.15)
+                _nested_gs = _main_gs[_row, _pair].subgridspec(
+                    1, 2, width_ratios=[6, 1], wspace=0.15
+                )
                 _ax_trend = _fig.add_subplot(_nested_gs[0, 0])
                 _ax_violin = _fig.add_subplot(_nested_gs[0, 1], sharey=_ax_trend)
                 MCVisualization.plot_temporal_trend(
-                    filtered_metrics,
+                    (filtered_metrics, _label),
                     _metric,
                     ax_trend=_ax_trend,
                     ax_violin=_ax_violin,
                     percentile=5.0,
                 )
-
 
     _fig
     return
@@ -351,7 +353,7 @@ def _(
 ):
     # Filter lazy_metrics by selected parameter combinations
     _selected_combos = combo_multiselect.value if combo_multiselect.value else []
-    _dfs = []
+    _dfs_with_labels = []
 
     if not _selected_combos:
         _fig = None
@@ -367,15 +369,18 @@ def _(
                 )
             _combo_data = lazy_metrics.filter(_combo_cond).collect()
             if len(_combo_data) > 0:
-                _dfs.append(_combo_data)
+                # Build label from parameter values
+                _label = ", ".join(f"{k}={v}" for k, v in _param_dict.items())
+                _dfs_with_labels.append((_combo_data, _label))
 
-        if _dfs and MetricNames.total_cells in _dfs[0].columns:
+        if (
+            _dfs_with_labels
+            and MetricNames.total_cells in _dfs_with_labels[0][0].columns
+        ):
             _metrics_to_plot = [
                 MetricNames.total_cells,
                 MetricNames.num_genotypes,
                 MetricNames.max_mutations,
-                MetricNames.shannon_index,
-                MetricNames.simpson_index,
             ]
 
             _fig = plt.figure(figsize=(16, 12))
@@ -386,11 +391,13 @@ def _(
                 _row = _idx // 2
                 _pair = _idx % 2  # 0 for left pair, 1 for right pair
                 # Nested grid within each pair: 1 row × 2 cols (trend, violin) with no spacing
-                _nested_gs = _main_gs[_row, _pair].subgridspec(1, 2, width_ratios=[6, 1], wspace=0.15)
+                _nested_gs = _main_gs[_row, _pair].subgridspec(
+                    1, 2, width_ratios=[6, 1], wspace=0.15
+                )
                 _ax_trend = _fig.add_subplot(_nested_gs[0, 0])
                 _ax_violin = _fig.add_subplot(_nested_gs[0, 1], sharey=_ax_trend)
                 MCVisualization.plot_temporal_trend(
-                    _dfs,
+                    _dfs_with_labels,
                     _metric,
                     ax_trend=_ax_trend,
                     ax_violin=_ax_violin,
