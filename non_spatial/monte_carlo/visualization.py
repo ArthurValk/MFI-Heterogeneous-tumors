@@ -105,6 +105,7 @@ class MCVisualization:
         bins: int = 30,
         ax: Optional[matplotlib.axes.Axes] = None,
         integer_valued: bool = False,
+        color_index: int = 0,
     ) -> matplotlib.axes.Axes:
         """Plot empirical probability distribution (histogram + KDE).
 
@@ -120,6 +121,8 @@ class MCVisualization:
             Axes to plot on (creates new if None)
         integer_valued : bool, optional
             If True, aligns bins to integer boundaries for integer-valued data (default: False)
+        color_index : int, optional
+            Index into COLORS list for histogram color (default: 0)
 
         Returns
         -------
@@ -144,12 +147,13 @@ class MCVisualization:
             bins = np.arange(min_val - 0.5, max_val + 1.5, 1)
 
         # Histogram
+        plot_color = COLORS[color_index % len(COLORS)]
         ax.hist(
             clean_data,
             bins=bins,
             density=True,
             alpha=0.6,
-            color="steelblue",
+            color=plot_color,
             edgecolor="black",
         )
 
@@ -173,6 +177,7 @@ class MCVisualization:
         time: int | float,
         metrics_to_plot: Optional[list[tuple[str, Literal["integer", "float"]]]] = None,
         figsize: tuple = (14, 12),
+        color_index: int = 0,
     ) -> matplotlib.figure.Figure:
         """Plot distributions of multiple metrics at a single timepoint.
 
@@ -186,6 +191,8 @@ class MCVisualization:
             List of (column_name, value_type) tuples to plot. If None, plots standard metrics.
         figsize : tuple, optional
             Figure size (default: (14, 10))
+        color_index : int, optional
+            Index into COLORS list for histogram color (default: 0)
 
         Returns
         -------
@@ -230,6 +237,7 @@ class MCVisualization:
                 title=f"{metric} at t={time}",
                 ax=axes[idx],
                 integer_valued=is_integer,
+                color_index=color_index,
             )
 
         # Hide unused subplots

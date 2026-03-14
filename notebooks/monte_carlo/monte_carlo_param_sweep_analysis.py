@@ -223,16 +223,13 @@ def _(MCVisualization, MetricNames, filtered_metrics, time_slider_filtered):
         (MetricNames.total_cells, "float"),
         (MetricNames.num_genotypes, "integer"),
         (MetricNames.max_mutations, "integer"),
-        (MetricNames.shannon_index, "float"),
-        (MetricNames.simpson_index, "float"),
-        (MetricNames.drug_concentration, "float"),
-        (MetricNames.drug_extra_death_wt, "float"),
     ]
     _dist_fig = MCVisualization.plot_metric_distributions_at_time(
         filtered_metrics,
         _selected_time,
         metrics_to_plot=_metrics_to_plot,
-        figsize=(12, 8),
+        figsize=(12, 4),
+        color_index=0,
     )
     _dist_fig
     return
@@ -463,14 +460,10 @@ def _(
             (MetricNames.total_cells, "float"),
             (MetricNames.num_genotypes, "integer"),
             (MetricNames.max_mutations, "integer"),
-            (MetricNames.shannon_index, "float"),
-            (MetricNames.simpson_index, "float"),
-            (MetricNames.drug_concentration, "float"),
-            (MetricNames.drug_extra_death_wt, "float"),
         ]
 
         # Collect distributions for each parameter combination at selected time
-        for _combo_label in sorted(_selected_combos):
+        for _combo_idx, _combo_label in enumerate(sorted(_selected_combos)):
             _param_dict = combo_to_params[_combo_label]
             # Build filter for this combo
             _combo_cond = None
@@ -487,6 +480,7 @@ def _(
                     _selected_time,
                     metrics_to_plot=_metrics_to_plot,
                     figsize=(12, 8),
+                    color_index=_combo_idx,
                 )
                 _figs.append(_fig)
 
