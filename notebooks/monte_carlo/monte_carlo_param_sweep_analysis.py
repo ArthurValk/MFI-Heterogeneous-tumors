@@ -9,7 +9,7 @@ If you have not yet performed the parameter sweep, you can run `notebooks/monte_
 import marimo
 
 __generated_with = "0.20.4"
-app = marimo.App()
+app = marimo.App(width="full")
 
 
 @app.cell
@@ -29,12 +29,12 @@ def _():
     from tests.test_output import TEST_OUTPUT_PATH
     import polars as pl
 
-    return MCVisualization, MetricNames, TEST_MC_PATH, mo, pl, plt, TEST_OUTPUT_PATH
+    return MCVisualization, MetricNames, TEST_OUTPUT_PATH, mo, pl, plt
 
 
 @app.cell
 def _(TEST_OUTPUT_PATH, mo):
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_10"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_27"
     from non_spatial.monte_carlo.monte_carlo import _load_metadata
 
     metadata = _load_metadata(output_dir)
@@ -99,7 +99,7 @@ def _(lazy_metrics, param_ranges, param_sliders, pl):
 
     if len(filtered_metrics) == 0:
         filtered_metrics = None
-    return (filtered_metrics,)
+    return filtered_metrics, selected_params
 
 
 @app.cell
@@ -122,7 +122,7 @@ def _(mo):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, filtered_metrics, selected_params, plt):
+def _(MCVisualization, MetricNames, filtered_metrics, plt, selected_params):
     if filtered_metrics is not None and len(filtered_metrics) > 0:
         _metrics_to_viz = [
             MetricNames.total_cells,
@@ -132,6 +132,7 @@ def _(MCVisualization, MetricNames, filtered_metrics, selected_params, plt):
 
         # Build label from selected parameters
         _label = ", ".join(f"{k}={v}" for k, v in selected_params.items())
+        print(_label)
 
         _fig = plt.figure(figsize=(16, 12))
         # Main grid: 3 rows × 2 column-pairs (left and right)

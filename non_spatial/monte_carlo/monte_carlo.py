@@ -10,6 +10,7 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
+from tqdm import tqdm
 
 from non_spatial.NonSpatialFusion import _ModelRun
 from non_spatial.parametrization import ModelParameters, MetricNames
@@ -48,7 +49,9 @@ class MonteCarloEngine:
         # Process seeds in batches
         num_batches = (len(seeds) + batch_size - 1) // batch_size
 
-        for batch_idx in range(num_batches):
+        for batch_idx in tqdm(
+            range(num_batches), desc="Processing batches", unit="batch"
+        ):
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, len(seeds))
             batch_seeds = seeds[start_idx:end_idx]
@@ -78,6 +81,7 @@ class MonteCarloEngine:
                     ),
                     treatment_selection=parameters.treatment_selection,
                     treatment_resistivity=parameters.treatment_resistivity,
+                    treatment_epistasis=parameters.treatment_epistasis,
                     seeds=batch_seeds,
                 )
             )
@@ -261,7 +265,9 @@ class MonteCarloEngine:
         with open(metadata_path, "w") as f:
             json.dump(sweep_metadata, f, indent=2)
 
-        for combo_values in combinations:
+        for combo_values in tqdm(
+            combinations, desc="Parameter combinations", unit="combo"
+        ):
             combo_params = _update_model_parameters(
                 parameters, param_names, combo_values
             )
@@ -387,6 +393,7 @@ def _run_monte_carlo_simulation(
     treatment_concentration_to_extra_death: float,
     treatment_selection: float,
     treatment_resistivity: float,
+    treatment_epistasis: float,
     seeds: list[int],
 ) -> tuple[list, list, list]:
     """Run Monte Carlo simulations for a list of seeds in parallel."""
@@ -412,13 +419,22 @@ def _run_monte_carlo_simulation(
             treatment_concentration_to_extra_death=treatment_concentration_to_extra_death,
             treatment_selection=treatment_selection,
             treatment_resistivity=treatment_resistivity,
+            treatment_epistasis=treatment_epistasis,
         )
 
     # Run simulations in parallel using ThreadPoolExecutor
     # Cap workers at CPU count to avoid thread overhead
     max_workers = min(len(seeds), os.cpu_count() or 4)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = list(executor.map(run_single_seed, seeds))
+        results = list(
+            tqdm(
+                executor.map(run_single_seed, seeds),
+                total=len(seeds),
+                desc="Running seeds",
+                unit="seed",
+                leave=False,
+            )
+        )
 
     # Unpack results
     lineage_data_all = [r[0] for r in results]
