@@ -176,7 +176,7 @@ def genotype_resistance_score(genotype, resistivity, epistasis: float) -> float:
     if s <= 0.0:
         return 0.0
 
-    return s**epistasis
+    return (1 + s) ** epistasis - 1
 
 
 @njit

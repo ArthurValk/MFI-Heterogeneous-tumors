@@ -12,7 +12,7 @@ is determined by the 'sweep_params' dictionary, with keys of type 'ModelParamete
 import marimo
 
 __generated_with = "0.20.4"
-app = marimo.App()
+app = marimo.App(width="full")
 
 
 @app.cell
@@ -46,13 +46,13 @@ def _(ModelParameters, ModelParametersTyping, TEST_OUTPUT_PATH, marimo):
     import numpy as np
 
     # Define parameter sweep configuration
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_11"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_27"
 
     # Base parameters (fixed for all sweep combinations)
     base_params = ModelParameters(
         number_of_genes=100,
         carrying_capacity=100000,
-        number_of_generations=24 * 4 * 140,  # 140 days, 15-minute steps
+        number_of_generations=24 * 4 * 180,  # 140 days, 15-minute steps
         mutation_rate_per_gene=1e-4,  # per birth event -> unchanged
         fusion_rate=1.4e-3,  # rescaled from per-12h to per-15min
         growth_rate=0.12 / 48.0,  # rescaled from per-12h to per-15min
@@ -61,7 +61,7 @@ def _(ModelParameters, ModelParametersTyping, TEST_OUTPUT_PATH, marimo):
         dt=0.25,  # 15 minutes = 0.25 hours
         data_resolution=24 * 4,  # store every day to prevent file size from exploding
         diversity=1,
-        initial_population_size=1000,
+        initial_population_size=10000,
         seed=0,
         treatment_injection_every=21 * 24 * 4,  # every 3 weeks
         treatment_initial_concentration=0.25,
@@ -72,8 +72,7 @@ def _(ModelParameters, ModelParametersTyping, TEST_OUTPUT_PATH, marimo):
         treatment_epistasis=1.0,
     )
     sweep_params: dict[ModelParametersTyping, np.ndarray] = {
-        "fusion_rate": np.array([0, 1.4e-3]),
-        "treatment_epistasis": np.array([0.5, 0.7, 1.0, 1.3, 1.5]),
+        "treatment_epistasis": np.array([0.9, 1, 1.1]),
     }
 
     from typing import get_args
@@ -98,7 +97,7 @@ def _(
     output_dir,
     sweep_params: "dict[ModelParametersTyping, np.ndarray]",
 ):
-    seeds = list(range(300))
+    seeds = list(range(500))
 
     try:
         MonteCarloEngine.monte_carlo_parameter_sweep(
