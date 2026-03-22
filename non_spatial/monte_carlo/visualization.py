@@ -267,6 +267,7 @@ class MCVisualization:
         ax_trend: Optional[matplotlib.axes.Axes] = None,
         ax_violin: Optional[matplotlib.axes.Axes] = None,
         percentile: float = 5.0,
+        treatment_times: list[float] | None = None,
     ) -> tuple[matplotlib.axes.Axes, Optional[matplotlib.axes.Axes]]:
         """Plot temporal trend of a metric across time with mean and quantiles.
 
@@ -290,6 +291,9 @@ class MCVisualization:
             Axes for violin plot (if provided, must share y-axis with ax_trend via GridSpec)
         percentile : float, optional
             Percentile for bands (default: 5.0, shows 5th-95th percentile range)
+        treatment_times : list[float], optional
+            Times when treatments are administered (in hours). If provided, vertical
+            dotted lines will be drawn at these times (default: None)
 
         Returns
         -------
@@ -413,6 +417,17 @@ class MCVisualization:
         )
         ax_trend.grid(True, alpha=0.3)
         ax_trend.legend()
+
+        # Add vertical dotted lines for treatment times
+        if treatment_times:
+            for treatment_time in treatment_times:
+                ax_trend.axvline(
+                    treatment_time,
+                    color="gray",
+                    linestyle="--",
+                    alpha=0.5,
+                    linewidth=1.5,
+                )
 
         if ax_violin is not None:
             # Since violins overlap, just show a single x-label

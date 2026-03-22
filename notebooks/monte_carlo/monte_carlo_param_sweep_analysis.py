@@ -34,7 +34,7 @@ def _():
 
 @app.cell
 def _(TEST_OUTPUT_PATH, mo):
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_27"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_28"
     from non_spatial.monte_carlo.monte_carlo import _load_metadata
 
     metadata = _load_metadata(output_dir)
@@ -48,6 +48,9 @@ def _(metadata, mo):
     # Get parameter ranges from metadata
     param_ranges = metadata.get("param_grids", {})
 
+    # Get treatment times from metadata (for visualization)
+    treatment_times = metadata.get("treatment_times", [])
+
     # Create sliders for each parameter dynamically using mo.ui.array for proper reactivity
     param_sliders = mo.ui.array(
         [
@@ -55,7 +58,7 @@ def _(metadata, mo):
             for _param_name, _param_values in sorted(param_ranges.items())
         ]
     )
-    return param_ranges, param_sliders
+    return param_ranges, param_sliders, treatment_times
 
 
 @app.cell
@@ -122,7 +125,14 @@ def _(mo):
 
 
 @app.cell
-def _(MCVisualization, MetricNames, filtered_metrics, plt, selected_params):
+def _(
+    MCVisualization,
+    MetricNames,
+    filtered_metrics,
+    plt,
+    selected_params,
+    treatment_times,
+):
     if filtered_metrics is not None and len(filtered_metrics) > 0:
         _metrics_to_viz = [
             MetricNames.total_cells,
@@ -154,6 +164,7 @@ def _(MCVisualization, MetricNames, filtered_metrics, plt, selected_params):
                     ax_trend=_ax_trend,
                     ax_violin=_ax_violin,
                     percentile=5.0,
+                    treatment_times=treatment_times if treatment_times else None,
                 )
 
     _fig
@@ -357,6 +368,7 @@ def _(
     lazy_metrics,
     pl,
     plt,
+    treatment_times,
 ):
     # Filter lazy_metrics by selected parameter combinations
     _selected_combos = combo_multiselect.value if combo_multiselect.value else []
@@ -409,6 +421,7 @@ def _(
                     ax_trend=_ax_trend,
                     ax_violin=_ax_violin,
                     percentile=5.0,
+                    treatment_times=treatment_times if treatment_times else None,
                 )
 
         else:
