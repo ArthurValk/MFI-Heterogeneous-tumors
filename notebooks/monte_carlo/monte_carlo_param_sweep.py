@@ -46,7 +46,7 @@ def _(ModelParameters, ModelParametersTyping, TEST_OUTPUT_PATH, marimo):
     import numpy as np
 
     # Define parameter sweep configuration
-    output_dir = TEST_OUTPUT_PATH / "param_sweep_27"
+    output_dir = TEST_OUTPUT_PATH / "param_sweep_28"
 
     # Base parameters (fixed for all sweep combinations)
     base_params = ModelParameters(
@@ -97,7 +97,7 @@ def _(
     output_dir,
     sweep_params: "dict[ModelParametersTyping, np.ndarray]",
 ):
-    seeds = list(range(500))
+    seeds = list(range(100))
 
     try:
         MonteCarloEngine.monte_carlo_parameter_sweep(

@@ -2,18 +2,22 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import shutil
 from dataclasses import fields, asdict
+from typing import Literal, get_args
 import itertools
 import json
 import gc
 import os
-from typing import Literal
 
 import numpy as np
 import polars as pl
 from tqdm import tqdm
 
 from non_spatial.NonSpatialFusion import _ModelRun
-from non_spatial.parametrization import ModelParameters, MetricNames
+from non_spatial.parametrization import (
+    ModelParameters,
+    MetricNames,
+    ModelParametersTyping,
+)
 
 
 class MonteCarloEngine:
@@ -251,6 +255,14 @@ class MonteCarloEngine:
         param_values = [sweep_params[name] for name in param_names]
         combinations = list(itertools.product(*param_values))
 
+        # Extract base parameters and calculate treatment times
+        base_params = _extract_base_params(parameters)
+        treatment_times = _calculate_treatment_times(
+            parameters.treatment_injection_every,
+            parameters.dt,
+            parameters.number_of_generations,
+        )
+
         # Store metadata about the sweep early (machine-independent)
         # This allows analysis notebooks to start working while simulations run
         sweep_metadata = {
@@ -258,6 +270,8 @@ class MonteCarloEngine:
             "num_combinations": len(combinations),
             "num_seeds": len(seeds),
             "total_runs": len(combinations) * len(seeds),
+            "base_params": base_params,
+            "treatment_times": treatment_times,
         }
 
         # Save sweep metadata immediately
@@ -485,6 +499,34 @@ def _load_results_lazily(
 ) -> pl.LazyFrame:
     """Loading results lazily from parquet files for efficient filtering and analysis."""
     return pl.scan_parquet(save_path / "**" / getattr(OutputFiles, data_source))
+
+
+def _extract_base_params(parameters: ModelParameters) -> dict:
+    """Extract base parameters from ModelParameters object."""
+    params_dict = asdict(parameters)
+    # Extract only fields in ModelParametersTyping
+    base_params_fields = get_args(ModelParametersTyping)
+    return {field: params_dict[field] for field in base_params_fields}
+
+
+def _calculate_treatment_times(
+    treatment_injection_every: int | None,
+    dt: float,
+    num_generations: int,
+) -> list[float]:
+    """Calculate times when treatment injections occur."""
+    if treatment_injection_every is None or treatment_injection_every <= 0:
+        return []
+
+    treatment_times = []
+    step = treatment_injection_every
+
+    # Generate injection times: treatments occur at step * dt
+    while step < num_generations:
+        treatment_times.append(step * dt)
+        step += treatment_injection_every
+
+    return treatment_times
 
 
 def _load_metadata(save_path: Path, file_name: str = SWEEP_METADATA_FILE) -> dict:
