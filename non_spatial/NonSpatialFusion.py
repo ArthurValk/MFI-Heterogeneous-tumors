@@ -166,7 +166,7 @@ def make_resistivity(Ngenes: int, selection: float, treatment_resistivity: float
 def genotype_resistance_score(genotype, resistivity, epistasis: float) -> float:
     """
     Precompute the total dimensionless resistance score for a genotype:
-        score = (sum(resistivity[i] for mutated loci)) ** epistasis
+        score = (1+sum(resistivity[i] for mutated loci)) ** epistasis - 1
     """
     s = 0.0
     for i in range(len(genotype)):
