@@ -395,7 +395,7 @@ class MCVisualization:
                     positions=[pos],
                     widths=0.7,
                     showmeans=True,
-                    showmedians=True,
+                    showmedians=False,
                     showextrema=False,
                 )
 

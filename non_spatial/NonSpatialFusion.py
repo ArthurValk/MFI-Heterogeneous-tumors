@@ -572,22 +572,7 @@ def _ModelRun(
             current_concentration * treatment_concentration_to_extra_death
         )
 
-        # Debug
-        if l % 200 == 0:
-            print(
-                "step =",
-                l,
-                "time_h =",
-                current_time,
-                "conc =",
-                current_concentration,
-                "extra_wt =",
-                current_extra_death_wt,
-                "TotalPopulation =",
-                TotalPopulation,
-            )
-
-        # Similate population growth and death
+        # Simulate population growth and death
         for j in range(0, len(ListePop)):
             nombreRepresentants = ListePop[j][POP_COUNT]
             if nombreRepresentants > 0:
